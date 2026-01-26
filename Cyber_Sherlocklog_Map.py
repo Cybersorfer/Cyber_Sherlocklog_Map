@@ -17,10 +17,6 @@ MAP_CONFIG = {
     "Sakhal": {
         "size": 8192, 
         "image": "map_sakhal.png"
-    },
-    "Custom": {
-        "size": 15360, # Default to Chernarus size
-        "image": "map_custom.png"
     }
 }
 
@@ -31,24 +27,18 @@ def parse_log_file(uploaded_file):
     lines = content.split('\n')
 
     # Regex to capture 3 numbers inside < > brackets
-    # Example matches: <1240.5, 120.3, 5000.1>
     coord_pattern = re.compile(r"<([0-9\.-]+),\s*([0-9\.-]+),\s*([0-9\.-]+)>")
-    
-    # Simple regex for player name
     name_pattern = re.compile(r'(?:Player|Identity)\s+"([^"]+)"')
 
     for line in lines:
         coord_match = coord_pattern.search(line)
         if coord_match:
-            # We capture all three numbers raw
             v1, v2, v3 = coord_match.groups()
-            
             name_match = name_pattern.search(line)
             name = name_match.group(1) if name_match else "Unknown"
             
             logs.append({
                 "name": name,
-                # Store raw values; we map them in the renderer
                 "raw_1": float(v1),
                 "raw_2": float(v2),
                 "raw_3": float(v3),
@@ -58,9 +48,10 @@ def parse_log_file(uploaded_file):
     return pd.DataFrame(logs)
 
 # --- 3. MAP RENDERING ENGINE ---
-def render_map(df, map_name, swap_xz, invert_z, use_y_as_z):
+def render_map(df, map_name, swap_xz, invert_z, use_y_as_z, off_x, off_y, scale_factor):
     config = MAP_CONFIG[map_name]
-    map_size = config["size"]
+    # Apply the manual scale factor to the map size definition
+    map_size = config["size"] 
     img_path = config["image"]
 
     fig = go.Figure()
@@ -74,7 +65,7 @@ def render_map(df, map_name, swap_xz, invert_z, use_y_as_z):
                 xref="x",
                 yref="y",
                 x=0,
-                y=map_size, # Top-Left corner of image (Y=Max)
+                y=map_size, 
                 sizex=map_size,
                 sizey=map_size,
                 sizing="stretch",
@@ -83,28 +74,25 @@ def render_map(df, map_name, swap_xz, invert_z, use_y_as_z):
             )
         )
     except FileNotFoundError:
-        st.warning(f"⚠️ Image not found: {img_path}. Please place image in folder.")
+        st.warning(f"⚠️ Image not found: {img_path}")
 
-    # -- B. Process Coordinates based on User Settings --
+    # -- B. Process Coordinates --
     if not df.empty:
-        # Standard DayZ Log format is usually <X (West/East), Y (Height), Z (North/South)>
-        # raw_1 = X, raw_2 = Y (Height), raw_3 = Z (North)
-        
+        # 1. Select Axes
         x_col = df["raw_1"]
-        
-        # If user says "My coordinates are squashed at the bottom", they are likely using Height (raw_2) as North.
-        # This toggle fixes that by forcing the parser to use the 3rd number (raw_3) as North.
-        if use_y_as_z:
-             z_col = df["raw_2"] # Unusual format <X, Z, Y>
-        else:
-             z_col = df["raw_3"] # Standard format <X, Y, Z>
+        z_col = df["raw_2"] if use_y_as_z else df["raw_3"]
 
-        # Handle Swapping and Inversion
+        # 2. Swap & Invert Logic
         final_x = z_col if swap_xz else x_col
         final_z = x_col if swap_xz else z_col
 
         if invert_z:
             final_z = map_size - final_z
+
+        # 3. APPLY FINE-TUNING (Offset & Scale)
+        # We modify the coordinates themselves to shift them onto the map image
+        final_x = (final_x * scale_factor) + off_x
+        final_z = (final_z * scale_factor) + off_y
 
         fig.add_trace(
             go.Scatter(
@@ -113,12 +101,11 @@ def render_map(df, map_name, swap_xz, invert_z, use_y_as_z):
                 mode='markers',
                 marker=dict(size=8, color='red', line=dict(width=1, color='white')),
                 text=df["name"],
-                customdata=df["details"],
-                hovertemplate="<b>%{text}</b><br>X: %{x:.0f}, Z: %{y:.0f}<br>%{customdata}<extra></extra>"
+                hovertemplate="<b>%{text}</b><br>X: %{x:.0f}, Z: %{y:.0f}<extra></extra>"
             )
         )
 
-    # -- C. Configure Axes --
+    # -- C. Lock Axes --
     fig.update_xaxes(range=[0, map_size], visible=False, showgrid=False)
     fig.update_yaxes(range=[0, map_size], visible=False, showgrid=False)
 
@@ -139,27 +126,36 @@ def main():
     with st.sidebar:
         st.title("🗺️ Settings")
         selected_map = st.selectbox("Map", list(MAP_CONFIG.keys()))
-        uploaded_file = st.file_uploader("Upload .ADM / .RPT / .Log", type=['adm', 'rpt', 'log', 'txt'])
+        uploaded_file = st.file_uploader("Upload Log", type=['adm', 'rpt', 'log', 'txt'])
         
         st.markdown("---")
         st.header("🔧 Calibrator")
-        st.info("Dots in the water? Try these:")
         
-        use_y_as_z = st.checkbox("Fix: Dots squashed at bottom? (Use 2nd number as North)", value=False)
-        swap_xz = st.checkbox("Swap X and Z Axis", value=False)
-        invert_z = st.checkbox("Invert Vertical Axis (Flip N/S)", value=False)
+        # Standard Toggles
+        use_y_as_z = st.checkbox("Fix: Dots in Ocean? (Use 2nd num as North)", value=False)
+        swap_xz = st.checkbox("Swap X/Z Axis", value=False)
+        invert_z = st.checkbox("Invert Vertical (Flip N/S)", value=False)
+        
+        st.markdown("---")
+        st.subheader("🎯 Fine-Tune Alignment")
+        st.caption("Use these sliders to match iZurvive positions.")
+        
+        # New Sliders for Offset and Scale
+        off_x = st.slider("X Offset (Left/Right)", -2000, 2000, 0, step=10)
+        off_y = st.slider("Y Offset (Up/Down)", -2000, 2000, 0, step=10)
+        scale_factor = st.slider("Scale Factor (Zoom)", 0.8, 1.2, 1.0, step=0.005)
 
     st.title(f"Server Map: {selected_map}")
 
     if uploaded_file:
         df = parse_log_file(uploaded_file)
         if not df.empty:
-            st.success(f"Loaded {len(df)} entries.")
-            render_map(df, selected_map, swap_xz, invert_z, use_y_as_z)
+            st.success(f"Loaded {len(df)} points. Calibrate using sidebar if needed.")
+            render_map(df, selected_map, swap_xz, invert_z, use_y_as_z, off_x, off_y, scale_factor)
         else:
-            st.error("No coordinates found. Check if logs contain format: <x, y, z>")
+            st.error("No coordinates found.")
     else:
-        st.info("Upload a log file to begin.")
+        st.info("Upload a log file to start.")
 
 if __name__ == "__main__":
     main()
