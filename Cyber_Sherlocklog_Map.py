@@ -110,39 +110,34 @@ def render_map(df, map_name, swap_xz, invert_z, use_y_as_z, off_x, off_y, scale_
 
     # -- B. Helper Function for Coordinate Transformation --
     def transform_coords(raw_x, raw_z):
-        # 1. Axis Swap/Logic
         final_x = raw_z if swap_xz else raw_x
         final_z = raw_x if swap_xz else raw_z
-        
-        # 2. Inversion
         if invert_z:
             final_z = map_size - final_z
-            
-        # 3. Calibration (Offset & Scale)
         final_x = (final_x * scale_factor) + off_x
         final_z = (final_z * scale_factor) + off_y
         return final_x, final_z
 
-    # -- C. Plot Towns (Improved: Bigger & On Black) --
+    # -- C. Plot Towns (Improved: White Text on Black Box, No Dots) --
     if show_towns and map_name in TOWN_DATA:
         towns = TOWN_DATA[map_name]
         for town in towns:
             tx, ty = transform_coords(town['x'], town['z'])
             
-            # Using Annotations instead of Scatter text allows for background boxes
+            # Using Annotation ONLY (No marker dot)
             fig.add_annotation(
                 x=tx,
                 y=ty,
                 text=town['name'],
                 showarrow=False,
                 font=dict(
-                    family="Arial Black", # Bold font
-                    size=14,              # Bigger size
-                    color="white"         # White text
+                    family="Arial Black", 
+                    size=12,              
+                    color="white"         
                 ),
-                bgcolor="black",          # Black background box
-                borderpad=4,              # Padding inside the black box
-                opacity=0.8               # Slight transparency
+                bgcolor="black",          
+                borderpad=3,              
+                opacity=0.85              
             )
 
     # -- D. Plot Log Data --
@@ -179,7 +174,7 @@ def render_map(df, map_name, swap_xz, invert_z, use_y_as_z, off_x, off_y, scale_
         width=900,
         height=900,
         margin={"l": 0, "r": 0, "t": 0, "b": 0},
-        plot_bgcolor="#0e1117", # Dark background for the plot area
+        plot_bgcolor="#0e1117", 
         dragmode="pan",
         showlegend=False
     )
@@ -190,21 +185,37 @@ def render_map(df, map_name, swap_xz, invert_z, use_y_as_z, off_x, off_y, scale_
 def main():
     st.set_page_config(layout="wide", page_title="DayZ Log Mapper")
 
-    # --- FORCED DARK THEME CSS ---
+    # --- ENHANCED DARK THEME CSS ---
     st.markdown("""
     <style>
-        /* Force Dark Theme Colors */
+        /* Main Background */
         .stApp {
             background-color: #0e1117;
             color: #fafafa;
         }
+        /* Sidebar Background */
         [data-testid="stSidebar"] {
             background-color: #262730;
             color: #fafafa;
         }
-        /* Fix text visibility in widgets */
+        /* Button Styling (Dark Theme) */
+        .stButton>button {
+            color: #ffffff;
+            background-color: #4CAF50; /* Green highlight for actions */
+            border: none;
+        }
+        .stButton>button:hover {
+            color: #ffffff;
+            background-color: #45a049;
+        }
+        /* Widgets (Sliders, Checkboxes, Dropdowns) Text Color */
         .stSelectbox label, .stCheckbox label, .stSlider label {
             color: #fafafa !important;
+        }
+        /* Input Box Styling */
+        div[data-baseweb="select"] > div {
+            background-color: #404040 !important;
+            color: white !important;
         }
     </style>
     """, unsafe_allow_html=True)
