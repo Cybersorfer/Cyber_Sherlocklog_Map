@@ -20,8 +20,7 @@ MAP_CONFIG = {
     }
 }
 
-# Add more towns here as needed using Game Coordinates <X, Z>
-# You can find coordinates on iZurvive
+# Database of Town Coordinates (calibrated for standard maps)
 TOWN_DATA = {
     "Chernarus": [
         {"name": "NWAF", "x": 4600, "z": 10200},
@@ -52,12 +51,13 @@ TOWN_DATA = {
         {"name": "Sitnik", "x": 6300, "z": 2200},
         {"name": "Radunin", "x": 9500, "z": 6800}
     ],
-    "Sakhal": [] # Add Sakhal towns here later
+    "Sakhal": []
 }
 
 # --- 2. LOG PARSING ENGINE ---
 def parse_log_file(uploaded_file):
     logs = []
+    # Reads the file from memory
     content = uploaded_file.getvalue().decode("utf-8", errors='ignore')
     lines = content.split('\n')
 
@@ -128,12 +128,9 @@ def render_map(df, map_name, swap_xz, invert_z, use_y_as_z, off_x, off_y, scale_
     if show_towns and map_name in TOWN_DATA:
         towns = TOWN_DATA[map_name]
         if towns:
-            t_x = []
-            t_y = []
-            t_names = []
+            t_x, t_y, t_names = [], [], []
             
             for town in towns:
-                # Apply SAME calibration to towns as players so they match the image
                 tx, ty = transform_coords(town['x'], town['z'])
                 t_x.append(tx)
                 t_y.append(ty)
@@ -147,18 +144,16 @@ def render_map(df, map_name, swap_xz, invert_z, use_y_as_z, off_x, off_y, scale_
                 textposition="top center",
                 marker=dict(size=5, color='yellow', opacity=0.7),
                 textfont=dict(color='white', size=10, family="Arial Black"),
-                hoverinfo='skip', # Don't show hover popup for towns
+                hoverinfo='skip',
                 name="Locations"
             ))
 
     # -- D. Plot Log Data --
     if not df.empty:
-        # Determine Raw X and Z from log columns
         raw_x_col = df["raw_1"]
         raw_z_col = df["raw_2"] if use_y_as_z else df["raw_3"]
         
-        # Apply transformation to the entire column at once
-        # (We duplicate logic here for vectorization speed)
+        # Apply logic to entire column
         final_x = raw_z_col if swap_xz else raw_x_col
         final_z = raw_x_col if swap_xz else raw_z_col
         
@@ -208,13 +203,20 @@ def main():
     
     with st.sidebar:
         st.title("🗺️ Settings")
+        
+        # --- NEW REFRESH FEATURE ---
+        if st.button("🔄 Refresh Map"):
+            st.rerun()
+            
+        st.markdown("---")
+        
         selected_map = st.selectbox("Map", list(MAP_CONFIG.keys()))
         uploaded_file = st.file_uploader("Upload Log", type=['adm', 'rpt', 'log', 'txt'])
         
         st.markdown("---")
         st.header("🔧 Calibrator")
         
-        # Calibration Defaults from your screenshot
+        # Calibration Defaults
         use_y_as_z = st.checkbox("Fix: Dots in Ocean? (Use 2nd num as North)", value=True)
         swap_xz = st.checkbox("Swap X/Z Axis", value=False)
         invert_z = st.checkbox("Invert Vertical (Flip N/S)", value=False)
@@ -240,9 +242,8 @@ def main():
         else:
             st.error("No coordinates found.")
     else:
-        # Show map with just towns if no file is uploaded
         render_map(pd.DataFrame(), selected_map, swap_xz, invert_z, use_y_as_z, off_x, off_y, scale_factor, show_towns)
-        st.info("Upload a log file to see player positions.")
+        st.info("Upload a log file to start.")
 
 if __name__ == "__main__":
     main()
