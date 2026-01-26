@@ -132,7 +132,7 @@ def main():
         st.header("🔧 Calibrator")
         
         # --- UPDATED DEFAULTS BASED ON YOUR SCREENSHOT ---
-        # "Fix Dots in Ocean" is now Checked (True) by default
+        # "Fix Dots in Ocean" is Checked (True)
         use_y_as_z = st.checkbox("Fix: Dots in Ocean? (Use 2nd num as North)", value=True)
         
         swap_xz = st.checkbox("Swap X/Z Axis", value=False)
@@ -141,10 +141,9 @@ def main():
         st.markdown("---")
         st.subheader("🎯 Fine-Tune Alignment")
         
-        # --- UPDATED SLIDER DEFAULTS ---
-        # Defaults set to -410 as per your calibration
-        off_x = st.slider("X Offset (Left/Right)", -2000, 2000, -410, step=10)
-        off_y = st.slider("Y Offset (Up/Down)", -2000, 2000, -410, step=10)
+        # --- UPDATED SLIDER DEFAULTS TO -20 ---
+        off_x = st.slider("X Offset (Left/Right)", -2000, 2000, -20, step=10)
+        off_y = st.slider("Y Offset (Up/Down)", -2000, 2000, -20, step=10)
         scale_factor = st.slider("Scale Factor (Zoom)", 0.8, 1.2, 1.0, step=0.005)
 
     st.title(f"Server Map: {selected_map}")
