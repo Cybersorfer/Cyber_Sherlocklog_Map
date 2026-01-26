@@ -118,27 +118,36 @@ def render_map(df, map_name, swap_xz, invert_z, use_y_as_z, off_x, off_y, scale_
         final_z = (final_z * scale_factor) + off_y
         return final_x, final_z
 
-    # -- C. Plot Towns (Improved: White Text on Black Box, No Dots) --
+    # -- C. Plot Towns (Yellow Markers + Black Text) --
     if show_towns and map_name in TOWN_DATA:
         towns = TOWN_DATA[map_name]
+        t_x, t_y, t_names = [], [], []
+        
         for town in towns:
             tx, ty = transform_coords(town['x'], town['z'])
-            
-            # Using Annotation ONLY (No marker dot)
-            fig.add_annotation(
-                x=tx,
-                y=ty,
-                text=town['name'],
-                showarrow=False,
-                font=dict(
-                    family="Arial Black", 
-                    size=12,              
-                    color="white"         
-                ),
-                bgcolor="black",          
-                borderpad=3,              
-                opacity=0.85              
-            )
+            t_x.append(tx)
+            t_y.append(ty)
+            t_names.append(town['name'])
+
+        fig.add_trace(go.Scatter(
+            x=t_x,
+            y=t_y,
+            mode='markers+text', # Dots AND Text
+            text=t_names,
+            textposition="top center", # Text sits above dot
+            marker=dict(
+                size=8, 
+                color='yellow', # Restored Yellow Dots
+                line=dict(width=1, color='black') # Small black outline for visibility
+            ),
+            textfont=dict(
+                family="Arial Black",
+                size=12,
+                color="black" # Requested Black Text
+            ),
+            hoverinfo='skip',
+            name="Locations"
+        ))
 
     # -- D. Plot Log Data --
     if not df.empty:
@@ -198,19 +207,31 @@ def main():
             background-color: #262730;
             color: #fafafa;
         }
-        /* Button Styling (Dark Theme) */
+        /* Button Styling */
         .stButton>button {
             color: #ffffff;
-            background-color: #4CAF50; /* Green highlight for actions */
+            background-color: #4CAF50;
             border: none;
         }
         .stButton>button:hover {
             color: #ffffff;
             background-color: #45a049;
         }
-        /* Widgets (Sliders, Checkboxes, Dropdowns) Text Color */
+        /* Widgets Text Color */
         .stSelectbox label, .stCheckbox label, .stSlider label {
             color: #fafafa !important;
+        }
+        /* FILE UPLOADER DARK THEME */
+        [data-testid="stFileUploader"] {
+            background-color: #262730; /* Dark box background */
+            border-radius: 5px;
+            padding: 10px;
+        }
+        [data-testid="stFileUploader"] section {
+            background-color: #363940 !important; /* The drop zone itself */
+        }
+        [data-testid="stFileUploader"] div, [data-testid="stFileUploader"] span, [data-testid="stFileUploader"] small {
+            color: #fafafa !important; /* Force white text in uploader */
         }
         /* Input Box Styling */
         div[data-baseweb="select"] > div {
