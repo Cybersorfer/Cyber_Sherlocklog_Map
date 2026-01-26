@@ -20,7 +20,7 @@ MAP_CONFIG = {
     }
 }
 
-# Database of Town Coordinates (calibrated for standard maps)
+# Database of Town Coordinates
 TOWN_DATA = {
     "Chernarus": [
         {"name": "NWAF", "x": 4600, "z": 10200},
@@ -57,7 +57,6 @@ TOWN_DATA = {
 # --- 2. LOG PARSING ENGINE ---
 def parse_log_file(uploaded_file):
     logs = []
-    # Reads the file from memory
     content = uploaded_file.getvalue().decode("utf-8", errors='ignore')
     lines = content.split('\n')
 
@@ -124,36 +123,33 @@ def render_map(df, map_name, swap_xz, invert_z, use_y_as_z, off_x, off_y, scale_
         final_z = (final_z * scale_factor) + off_y
         return final_x, final_z
 
-    # -- C. Plot Towns (If Enabled) --
+    # -- C. Plot Towns (Improved: Bigger & On Black) --
     if show_towns and map_name in TOWN_DATA:
         towns = TOWN_DATA[map_name]
-        if towns:
-            t_x, t_y, t_names = [], [], []
+        for town in towns:
+            tx, ty = transform_coords(town['x'], town['z'])
             
-            for town in towns:
-                tx, ty = transform_coords(town['x'], town['z'])
-                t_x.append(tx)
-                t_y.append(ty)
-                t_names.append(town['name'])
-
-            fig.add_trace(go.Scatter(
-                x=t_x,
-                y=t_y,
-                mode='text+markers',
-                text=t_names,
-                textposition="top center",
-                marker=dict(size=5, color='yellow', opacity=0.7),
-                textfont=dict(color='white', size=10, family="Arial Black"),
-                hoverinfo='skip',
-                name="Locations"
-            ))
+            # Using Annotations instead of Scatter text allows for background boxes
+            fig.add_annotation(
+                x=tx,
+                y=ty,
+                text=town['name'],
+                showarrow=False,
+                font=dict(
+                    family="Arial Black", # Bold font
+                    size=14,              # Bigger size
+                    color="white"         # White text
+                ),
+                bgcolor="black",          # Black background box
+                borderpad=4,              # Padding inside the black box
+                opacity=0.8               # Slight transparency
+            )
 
     # -- D. Plot Log Data --
     if not df.empty:
         raw_x_col = df["raw_1"]
         raw_z_col = df["raw_2"] if use_y_as_z else df["raw_3"]
         
-        # Apply logic to entire column
         final_x = raw_z_col if swap_xz else raw_x_col
         final_z = raw_x_col if swap_xz else raw_z_col
         
@@ -183,16 +179,9 @@ def render_map(df, map_name, swap_xz, invert_z, use_y_as_z, off_x, off_y, scale_
         width=900,
         height=900,
         margin={"l": 0, "r": 0, "t": 0, "b": 0},
-        plot_bgcolor="#1e1e1e",
+        plot_bgcolor="#0e1117", # Dark background for the plot area
         dragmode="pan",
-        legend=dict(
-            yanchor="top",
-            y=0.99,
-            xanchor="left",
-            x=0.01,
-            bgcolor="rgba(0,0,0,0.5)",
-            font=dict(color="white")
-        )
+        showlegend=False
     )
 
     st.plotly_chart(fig, use_container_width=True)
@@ -200,11 +189,29 @@ def render_map(df, map_name, swap_xz, invert_z, use_y_as_z, off_x, off_y, scale_
 # --- 4. MAIN INTERFACE ---
 def main():
     st.set_page_config(layout="wide", page_title="DayZ Log Mapper")
+
+    # --- FORCED DARK THEME CSS ---
+    st.markdown("""
+    <style>
+        /* Force Dark Theme Colors */
+        .stApp {
+            background-color: #0e1117;
+            color: #fafafa;
+        }
+        [data-testid="stSidebar"] {
+            background-color: #262730;
+            color: #fafafa;
+        }
+        /* Fix text visibility in widgets */
+        .stSelectbox label, .stCheckbox label, .stSlider label {
+            color: #fafafa !important;
+        }
+    </style>
+    """, unsafe_allow_html=True)
     
     with st.sidebar:
         st.title("🗺️ Settings")
         
-        # --- NEW REFRESH FEATURE ---
         if st.button("🔄 Refresh Map"):
             st.rerun()
             
@@ -216,7 +223,7 @@ def main():
         st.markdown("---")
         st.header("🔧 Calibrator")
         
-        # Calibration Defaults
+        # Confirmed Calibration Defaults
         use_y_as_z = st.checkbox("Fix: Dots in Ocean? (Use 2nd num as North)", value=True)
         swap_xz = st.checkbox("Swap X/Z Axis", value=False)
         invert_z = st.checkbox("Invert Vertical (Flip N/S)", value=False)
