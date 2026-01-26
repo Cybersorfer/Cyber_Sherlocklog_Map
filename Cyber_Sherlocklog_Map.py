@@ -23,6 +23,7 @@ MAP_CONFIG = {
 # --- 2. LOG PARSING ENGINE ---
 def parse_log_file(uploaded_file):
     logs = []
+    # Decode file; 'errors=ignore' prevents crashing on weird characters
     content = uploaded_file.getvalue().decode("utf-8", errors='ignore')
     lines = content.split('\n')
 
@@ -42,7 +43,7 @@ def parse_log_file(uploaded_file):
                 "raw_1": float(v1),
                 "raw_2": float(v2),
                 "raw_3": float(v3),
-                "details": line[:120]
+                "details": line[:120] # Keep a snippet of the log for the popup
             })
             
     return pd.DataFrame(logs)
@@ -50,8 +51,7 @@ def parse_log_file(uploaded_file):
 # --- 3. MAP RENDERING ENGINE ---
 def render_map(df, map_name, swap_xz, invert_z, use_y_as_z, off_x, off_y, scale_factor):
     config = MAP_CONFIG[map_name]
-    # Apply the manual scale factor to the map size definition
-    map_size = config["size"] 
+    map_size = config["size"]
     img_path = config["image"]
 
     fig = go.Figure()
@@ -78,7 +78,7 @@ def render_map(df, map_name, swap_xz, invert_z, use_y_as_z, off_x, off_y, scale_
 
     # -- B. Process Coordinates --
     if not df.empty:
-        # 1. Select Axes
+        # 1. Select Axes based on "Dots in Ocean" fix
         x_col = df["raw_1"]
         z_col = df["raw_2"] if use_y_as_z else df["raw_3"]
 
@@ -89,7 +89,7 @@ def render_map(df, map_name, swap_xz, invert_z, use_y_as_z, off_x, off_y, scale_
         if invert_z:
             final_z = map_size - final_z
 
-        # 3. APPLY FINE-TUNING (Offset & Scale)
+        # 3. APPLY YOUR SAVED OFFSET & SCALE
         # We modify the coordinates themselves to shift them onto the map image
         final_x = (final_x * scale_factor) + off_x
         final_z = (final_z * scale_factor) + off_y
@@ -131,18 +131,20 @@ def main():
         st.markdown("---")
         st.header("🔧 Calibrator")
         
-        # Standard Toggles
-        use_y_as_z = st.checkbox("Fix: Dots in Ocean? (Use 2nd num as North)", value=False)
+        # --- UPDATED DEFAULTS BASED ON YOUR SCREENSHOT ---
+        # "Fix Dots in Ocean" is now Checked (True) by default
+        use_y_as_z = st.checkbox("Fix: Dots in Ocean? (Use 2nd num as North)", value=True)
+        
         swap_xz = st.checkbox("Swap X/Z Axis", value=False)
         invert_z = st.checkbox("Invert Vertical (Flip N/S)", value=False)
         
         st.markdown("---")
         st.subheader("🎯 Fine-Tune Alignment")
-        st.caption("Use these sliders to match iZurvive positions.")
         
-        # New Sliders for Offset and Scale
-        off_x = st.slider("X Offset (Left/Right)", -2000, 2000, 0, step=10)
-        off_y = st.slider("Y Offset (Up/Down)", -2000, 2000, 0, step=10)
+        # --- UPDATED SLIDER DEFAULTS ---
+        # Defaults set to -410 as per your calibration
+        off_x = st.slider("X Offset (Left/Right)", -2000, 2000, -410, step=10)
+        off_y = st.slider("Y Offset (Up/Down)", -2000, 2000, -410, step=10)
         scale_factor = st.slider("Scale Factor (Zoom)", 0.8, 1.2, 1.0, step=0.005)
 
     st.title(f"Server Map: {selected_map}")
@@ -150,7 +152,7 @@ def main():
     if uploaded_file:
         df = parse_log_file(uploaded_file)
         if not df.empty:
-            st.success(f"Loaded {len(df)} points. Calibrate using sidebar if needed.")
+            st.success(f"Loaded {len(df)} points.")
             render_map(df, selected_map, swap_xz, invert_z, use_y_as_z, off_x, off_y, scale_factor)
         else:
             st.error("No coordinates found.")
