@@ -3,78 +3,69 @@ import plotly.graph_objects as go
 import re
 import pandas as pd
 from PIL import Image
-import os
 
 # --- 1. CONFIGURATION ---
 MAP_CONFIG = {
     "Chernarus": {
         "size": 15360,
-        "image": "map_chernarus.png"
+        "image": "map_chernarus.png" 
     },
     "Livonia": {
         "size": 12800,
         "image": "map_livonia.png"
     },
     "Sakhal": {
-        "size": 8192, # Approximate, adjust if needed
+        "size": 8192, 
         "image": "map_sakhal.png"
+    },
+    "Custom": {
+        "size": 15360, # Default to Chernarus size
+        "image": "map_custom.png"
     }
 }
 
 # --- 2. LOG PARSING ENGINE ---
 def parse_log_file(uploaded_file):
-    """
-    Reads a DayZ log file and extracts coordinates using Regex.
-    Looks for patterns like: <1234.5, 67.8, 9012.3>
-    """
     logs = []
-    
-    # Decodes bytes to string
-    content = uploaded_file.getvalue().decode("utf-8")
+    content = uploaded_file.getvalue().decode("utf-8", errors='ignore')
     lines = content.split('\n')
 
-    # Regex to find vectors: <X, Y, Z> or similar
-    # Matches: <digits.digits, digits.digits, digits.digits>
+    # Regex to capture 3 numbers inside < > brackets
+    # Example matches: <1240.5, 120.3, 5000.1>
     coord_pattern = re.compile(r"<([0-9\.-]+),\s*([0-9\.-]+),\s*([0-9\.-]+)>")
     
-    # Regex to try and find a player name near the coordinates
-    # Looks for 'Player "Name"' or 'Identity "Name"'
+    # Simple regex for player name
     name_pattern = re.compile(r'(?:Player|Identity)\s+"([^"]+)"')
 
     for line in lines:
         coord_match = coord_pattern.search(line)
         if coord_match:
-            # DayZ Log Vector is usually <East(X), Height(Y), North(Z)>
-            x, y, z = coord_match.groups()
+            # We capture all three numbers raw
+            v1, v2, v3 = coord_match.groups()
             
-            # Extract name if present, else use line number
             name_match = name_pattern.search(line)
-            name = name_match.group(1) if name_match else "Unknown/Object"
-
-            # Basic clean up of the log line for display
-            clean_details = line[:100] + "..." if len(line) > 100 else line
-
+            name = name_match.group(1) if name_match else "Unknown"
+            
             logs.append({
                 "name": name,
-                "x": float(x),
-                "z": float(z), # We use Z for the map's vertical axis
-                "h": float(y), # Height
-                "details": clean_details
+                # Store raw values; we map them in the renderer
+                "raw_1": float(v1),
+                "raw_2": float(v2),
+                "raw_3": float(v3),
+                "details": line[:120]
             })
             
     return pd.DataFrame(logs)
 
 # --- 3. MAP RENDERING ENGINE ---
-def render_map(df, map_name):
+def render_map(df, map_name, swap_xz, invert_z, use_y_as_z):
     config = MAP_CONFIG[map_name]
     map_size = config["size"]
     img_path = config["image"]
 
-    # Initialize Figure
     fig = go.Figure()
 
     # -- A. Load Map Image --
-    # We attempt to load the image. If missing, we show a blank grid.
     try:
         img = Image.open(img_path)
         fig.add_layout_image(
@@ -83,7 +74,7 @@ def render_map(df, map_name):
                 xref="x",
                 yref="y",
                 x=0,
-                y=map_size, # Plotly places image top-left corner here
+                y=map_size, # Top-Left corner of image (Y=Max)
                 sizex=map_size,
                 sizey=map_size,
                 sizing="stretch",
@@ -92,84 +83,83 @@ def render_map(df, map_name):
             )
         )
     except FileNotFoundError:
-        st.warning(f"⚠️ Map image not found: `{img_path}`. Displaying grid only.")
+        st.warning(f"⚠️ Image not found: {img_path}. Please place image in folder.")
 
-    # -- B. Plot Data Points --
+    # -- B. Process Coordinates based on User Settings --
     if not df.empty:
+        # Standard DayZ Log format is usually <X (West/East), Y (Height), Z (North/South)>
+        # raw_1 = X, raw_2 = Y (Height), raw_3 = Z (North)
+        
+        x_col = df["raw_1"]
+        
+        # If user says "My coordinates are squashed at the bottom", they are likely using Height (raw_2) as North.
+        # This toggle fixes that by forcing the parser to use the 3rd number (raw_3) as North.
+        if use_y_as_z:
+             z_col = df["raw_2"] # Unusual format <X, Z, Y>
+        else:
+             z_col = df["raw_3"] # Standard format <X, Y, Z>
+
+        # Handle Swapping and Inversion
+        final_x = z_col if swap_xz else x_col
+        final_z = x_col if swap_xz else z_col
+
+        if invert_z:
+            final_z = map_size - final_z
+
         fig.add_trace(
             go.Scatter(
-                x=df["x"],
-                y=df["z"], # In Cartesian 2D plot, Y axis is the Game's North/South (Z)
+                x=final_x,
+                y=final_z,
                 mode='markers',
-                marker=dict(
-                    size=8,
-                    color='red',
-                    symbol='circle',
-                    line=dict(width=1, color='white')
-                ),
+                marker=dict(size=8, color='red', line=dict(width=1, color='white')),
                 text=df["name"],
                 customdata=df["details"],
-                hovertemplate="<b>%{text}</b><br>Coords: %{x:.0f}, %{y:.0f}<br>Log: %{customdata}<extra></extra>"
+                hovertemplate="<b>%{text}</b><br>X: %{x:.0f}, Z: %{y:.0f}<br>%{customdata}<extra></extra>"
             )
         )
 
-    # -- C. Configure Axes & Layout --
-    # Force the axis to match the game world size exactly
+    # -- C. Configure Axes --
     fig.update_xaxes(range=[0, map_size], visible=False, showgrid=False)
     fig.update_yaxes(range=[0, map_size], visible=False, showgrid=False)
 
     fig.update_layout(
-        width=800,
-        height=800,
+        width=900,
+        height=900,
         margin={"l": 0, "r": 0, "t": 0, "b": 0},
-        plot_bgcolor="black",
-        dragmode="pan", # Enables the "hand" tool by default like iZurvive
+        plot_bgcolor="#1e1e1e",
+        dragmode="pan"
     )
 
     st.plotly_chart(fig, use_container_width=True)
 
-# --- 4. MAIN APP INTERFACE ---
+# --- 4. MAIN INTERFACE ---
 def main():
-    st.set_page_config(layout="wide", page_title="Log Mapper Tool")
+    st.set_page_config(layout="wide", page_title="DayZ Log Mapper")
     
-    st.title("🗺️ Interactive Server Log Mapper")
-    st.markdown("Upload your **.ADM** or **.RPT** files to visualize coordinates.")
-
-    # Sidebar Controls
     with st.sidebar:
-        st.header("Settings")
-        selected_map = st.selectbox("Select Terrain", options=list(MAP_CONFIG.keys()))
+        st.title("🗺️ Settings")
+        selected_map = st.selectbox("Map", list(MAP_CONFIG.keys()))
+        uploaded_file = st.file_uploader("Upload .ADM / .RPT / .Log", type=['adm', 'rpt', 'log', 'txt'])
         
-        uploaded_file = st.file_uploader("Upload Log File", type=['adm', 'rpt', 'txt', 'log'])
+        st.markdown("---")
+        st.header("🔧 Calibrator")
+        st.info("Dots in the water? Try these:")
         
-        st.info("**Tip:** Ensure your map images are in the same folder as this script.")
+        use_y_as_z = st.checkbox("Fix: Dots squashed at bottom? (Use 2nd number as North)", value=False)
+        swap_xz = st.checkbox("Swap X and Z Axis", value=False)
+        invert_z = st.checkbox("Invert Vertical Axis (Flip N/S)", value=False)
 
-    # Main Processing
+    st.title(f"Server Map: {selected_map}")
+
     if uploaded_file:
-        with st.spinner("Parsing logs..."):
-            df = parse_log_file(uploaded_file)
-        
+        df = parse_log_file(uploaded_file)
         if not df.empty:
-            st.success(f"Found {len(df)} coordinates!")
-            
-            # Optional: Filter by Player Name
-            all_players = ["All"] + list(df["name"].unique())
-            selected_player = st.selectbox("Filter by Player/Entity", all_players)
-            
-            if selected_player != "All":
-                df = df[df["name"] == selected_player]
-
-            # Render the Map
-            render_map(df, selected_map)
-            
-            # Show Raw Data Table
-            with st.expander("View Raw Data"):
-                st.dataframe(df)
+            st.success(f"Loaded {len(df)} entries.")
+            render_map(df, selected_map, swap_xz, invert_z, use_y_as_z)
         else:
-            st.warning("No coordinates found in this file. Ensure the logs use format `<x, y, z>`.")
+            st.error("No coordinates found. Check if logs contain format: <x, y, z>")
     else:
-        # Show an empty map (placeholder) so the app looks nice on load
-        render_map(pd.DataFrame(), selected_map)
+        st.info("Upload a log file to begin.")
 
 if __name__ == "__main__":
     main()
