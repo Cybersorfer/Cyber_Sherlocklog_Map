@@ -3,6 +3,7 @@ import plotly.graph_objects as go
 import re
 import pandas as pd
 from PIL import Image
+from datetime import datetime, time
 
 # --- 1. CONFIGURATION & DATABASE ---
 MAP_CONFIG = {
@@ -11,7 +12,7 @@ MAP_CONFIG = {
     "Sakhal": {"size": 8192, "image": "map_sakhal.png"}
 }
 
-# --- TOWN DATABASE (Restored & Permanent) ---
+# --- TOWN DATABASE ---
 TOWN_DATA = {
     "Chernarus": [
         {"name": "NWAF", "x": 4600, "z": 10200},
@@ -43,7 +44,6 @@ TOWN_DATA = {
     "Sakhal": []
 }
 
-# Default Database (Used if no CSV is uploaded)
 DEFAULT_POI_DATABASE = {
     "Chernarus": {
         "🛡️ Military": [{"name": "Tisy Radar", "x": 1700, "z": 14000}],
@@ -61,20 +61,41 @@ def parse_log_file(uploaded_file):
     logs = []
     content = uploaded_file.getvalue().decode("utf-8", errors='ignore')
     lines = content.split('\n')
+    
+    # Regex Patterns
+    # Matches: <1234.5, 6789.0, 100>
     coord_pattern = re.compile(r"<([0-9\.-]+),\s*([0-9\.-]+),\s*([0-9\.-]+)>")
+    # Matches: Player "Name"
     name_pattern = re.compile(r'(?:Player|Identity)\s+"([^"]+)"')
+    # Matches Time at start of line: 12:45:01
+    time_pattern = re.compile(r'^(\d{2}:\d{2}:\d{2})')
 
     for line in lines:
         coord_match = coord_pattern.search(line)
         if coord_match:
             v1, v2, v3 = coord_match.groups()
             name_match = name_pattern.search(line)
+            time_match = time_pattern.search(line)
+            
             name = name_match.group(1) if name_match else "Unknown"
+            
+            # Parse Time
+            log_time = None
+            if time_match:
+                try:
+                    t_str = time_match.group(1)
+                    log_time = datetime.strptime(t_str, "%H:%M:%S").time()
+                except:
+                    pass
+            
             logs.append({
+                "time_obj": log_time, # For filtering
+                "time_str": str(log_time) if log_time else "??:??:??", # For display
                 "name": name,
                 "raw_1": float(v1), "raw_2": float(v2), "raw_3": float(v3),
                 "activity": line.strip()[:150] 
             })
+            
     return pd.DataFrame(logs)
 
 def parse_poi_csv(uploaded_csv):
@@ -128,48 +149,61 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
     except:
         fig.add_shape(type="rect", x0=0, y0=0, x1=map_size, y1=map_size, line=dict(color="RoyalBlue"))
 
-    # B. GRID SYSTEM (Lines & Labels)
+    # B. GRID SYSTEM (Axes & Lines)
     if settings['show_grid']:
-        # 1. Draw Grid Lines
-        for i in range(0, int(map_size), 1000):
-            t_val = (i * settings['scale_factor']) + settings['off_x']
-            t_val_y = (i * settings['scale_factor']) + settings['off_y']
-            
-            # Vertical
-            fig.add_shape(type="line", x0=t_val, y0=0, x1=t_val, y1=map_size,
-                          line=dict(color="rgba(255, 255, 255, 0.15)", width=1, dash="dot"))
-            # Horizontal
-            fig.add_shape(type="line", x0=0, y0=t_val_y, x1=map_size, y1=t_val_y,
-                          line=dict(color="rgba(255, 255, 255, 0.15)", width=1, dash="dot"))
-
-        # 2. Draw Edge Labels (0, 1, 2... 15)
-        grid_labels_x = []
-        grid_labels_y = []
-        grid_text = []
-        
-        # Calculate positions (Offset by 500m to center text in grid square)
+        # Create Ticks for 00-15
+        tick_vals = []
+        tick_text = []
         for i in range(16): # 0 to 15
-            center_pos = (i * 1000) + 500
-            t_pos, _ = transform_coords(center_pos, 0, settings, map_size) # Transform X
-            _, t_pos_y = transform_coords(0, center_pos, settings, map_size) # Transform Y (actually Z in game)
-            
-            # Top Edge Numbers
-            fig.add_trace(go.Scatter(
-                x=[t_pos], y=[map_size - 200], # Slightly inside top edge
-                mode='text', text=[str(i)],
-                textfont=dict(size=14, color='rgba(255,255,255,0.7)', family="Arial Black"),
-                hoverinfo='skip', showlegend=False
-            ))
-            
-            # Left Edge Numbers
-            fig.add_trace(go.Scatter(
-                x=[200], y=[t_pos_y], # Slightly inside left edge
-                mode='text', text=[str(i)],
-                textfont=dict(size=14, color='rgba(255,255,255,0.7)', family="Arial Black"),
-                hoverinfo='skip', showlegend=False
-            ))
+            # Center of the 1000m grid square
+            val = (i * 1000) + 500
+            # Transform to plot space
+            t_val, _ = transform_coords(val, 0, settings, map_size) 
+            tick_vals.append(t_val)
+            tick_text.append(f"{i:02d}") # "00", "01"...
 
-    # C. TOWNS (Permanent Layer)
+        # Configure Axes to act as Grid Headers
+        fig.update_xaxes(
+            visible=True,
+            range=[0, map_size],
+            side="top",
+            tickmode="array",
+            tickvals=tick_vals,
+            ticktext=tick_text,
+            tickfont=dict(size=14, color="white", family="Arial Black"),
+            showgrid=True,
+            gridcolor="rgba(255, 255, 255, 0.2)",
+            gridwidth=1,
+            dtick=1000 * settings['scale_factor'], # Ensure grid lines match ticks
+            zeroline=False
+        )
+        
+        # For Y Axis, we need to be careful with Inversion
+        # We generate tick vals for Y independently
+        y_tick_vals = []
+        for i in range(16):
+            val = (i * 1000) + 500
+            _, t_val_y = transform_coords(0, val, settings, map_size)
+            y_tick_vals.append(t_val_y)
+        
+        fig.update_yaxes(
+            visible=True,
+            range=[0, map_size], # Plotly Y is typically 0 at bottom, map_size at top
+            autorange=True if not settings['invert_z'] else "reversed", # Handle flipping via axes if needed
+            tickmode="array",
+            tickvals=y_tick_vals,
+            ticktext=tick_text, # Same 00-15 labels
+            tickfont=dict(size=14, color="white", family="Arial Black"),
+            showgrid=True,
+            gridcolor="rgba(255, 255, 255, 0.2)",
+            gridwidth=1,
+            zeroline=False
+        )
+    else:
+        fig.update_xaxes(visible=False, range=[0, map_size])
+        fig.update_yaxes(visible=False, range=[0, map_size])
+
+    # C. TOWNS (Updated for Visibility)
     if settings['show_towns'] and map_name in TOWN_DATA:
         t_x, t_y, t_names = [], [], []
         for town in TOWN_DATA[map_name]:
@@ -178,15 +212,16 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
         
         fig.add_trace(go.Scatter(
             x=t_x, y=t_y, 
-            mode='markers+text', # TEXT ENABLED
+            mode='markers+text',
             text=t_names, 
             textposition="top center",
-            marker=dict(size=6, color='yellow', line=dict(width=1, color='black')),
-            textfont=dict(family="Arial Black", size=11, color="black"), # BLACK TEXT
+            marker=dict(size=5, color='yellow', line=dict(width=1, color='black')),
+            # IMPROVED FONT VISIBILITY
+            textfont=dict(family="Arial Black", size=14, color="black"), 
             hoverinfo='none', name="Towns"
         ))
 
-    # D. STATIC LAYERS (CSV / POI DB)
+    # D. STATIC LAYERS
     if map_name in poi_db:
         for layer_name, locations in poi_db[map_name].items():
             if layer_name in active_layers:
@@ -234,7 +269,9 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
         fig.add_trace(go.Scatter(
             x=fx, y=fz, mode='markers',
             marker=dict(size=sizes, color=colors, line=dict(width=1, color='white')),
-            text=df["name"], customdata=df["activity"],
+            text=df["name"], 
+            customdata=df["activity"],
+            # Added Time to Hover
             hovertemplate="<b>%{text}</b><br>%{customdata}<extra></extra>",
             name="Logs"
         ))
@@ -242,11 +279,10 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
     # G. LAYOUT
     fig.update_layout(
         width=900, height=800,
-        margin={"l": 0, "r": 0, "t": 0, "b": 0},
+        margin={"l": 40, "r": 40, "t": 40, "b": 20}, # Added margin for Axis Labels
         plot_bgcolor="#0e1117", paper_bgcolor="#0e1117",
         dragmode="pan" if settings['click_mode'] == "Navigate" else False,
         showlegend=True,
-        # LEGEND LOWERED TO 0.85 TO AVOID ZOOM TOOLS
         legend=dict(
             yanchor="top", y=0.85, 
             xanchor="right", x=0.99, 
@@ -254,8 +290,6 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
             font=dict(color="white")
         )
     )
-    fig.update_xaxes(visible=False, range=[0, map_size])
-    fig.update_yaxes(visible=False, range=[0, map_size])
     
     return fig, map_size
 
@@ -264,6 +298,7 @@ def main():
     st.set_page_config(layout="wide", page_title="DayZ Intel Mapper")
     if 'custom_markers' not in st.session_state: st.session_state['custom_markers'] = []
     
+    # CSS
     st.markdown("""
     <style>
         .stApp { background-color: #0e1117; color: #fafafa; }
@@ -293,6 +328,32 @@ def main():
         else:
             current_db = DEFAULT_POI_DATABASE
 
+        # PARSE LOGS FIRST (For Timeline)
+        df = parse_log_file(uploaded_log) if uploaded_log else pd.DataFrame()
+
+        # --- TIMELINE FILTER ---
+        if not df.empty and 'time_obj' in df.columns:
+            # Filter out rows with no valid time
+            valid_times = df.dropna(subset=['time_obj'])
+            if not valid_times.empty:
+                st.markdown("---")
+                st.subheader("⏳ Time Filter")
+                min_t = valid_times['time_obj'].min()
+                max_t = valid_times['time_obj'].max()
+                
+                if min_t != max_t:
+                    start_time, end_time = st.slider(
+                        "Event Window",
+                        value=(min_t, max_t),
+                        format="HH:mm:ss"
+                    )
+                    # FILTER DF
+                    df = df[
+                        (df['time_obj'] >= start_time) & 
+                        (df['time_obj'] <= end_time)
+                    ]
+                    st.caption(f"Showing events from {start_time} to {end_time}")
+
         st.markdown("---")
         st.subheader("👁️ Layers")
         available_layers = current_db.get(selected_map, {}).keys()
@@ -302,7 +363,6 @@ def main():
                 if st.checkbox(layer, value=True):
                     active_layers.append(layer)
         
-        # Grid & Town Toggles
         show_grid = st.checkbox("Show Grid (0-15)", value=True)
         show_towns = st.checkbox("Show Town Names", value=True)
 
@@ -332,7 +392,7 @@ def main():
     col1, col2 = st.columns([0.85, 0.15])
     with col1: st.subheader(f"📍 {selected_map}")
     
-    df = parse_log_file(uploaded_log) if uploaded_log else pd.DataFrame()
+    # RENDER
     fig, map_size = render_map(df, selected_map, settings, search_term, st.session_state['custom_markers'], active_layers, current_db)
 
     event = st.plotly_chart(
