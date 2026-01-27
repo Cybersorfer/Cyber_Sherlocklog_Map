@@ -57,7 +57,7 @@ MARKER_ICONS = {
     "Loot": "🎒", "POI": "📍", "Enemy": "⚔️"
 }
 
-# --- 2. CACHED DATA LOADING ---
+# --- 2. CACHED DATA LOADING (SPEED OPTIMIZATION) ---
 @st.cache_resource
 def load_map_image(image_path):
     try:
@@ -114,31 +114,31 @@ def parse_poi_csv(uploaded_csv):
     except Exception:
         return DEFAULT_POI_DATABASE
 
-# --- 3. MATH (STRICT TOP-LEFT ORIGIN) ---
+# --- 3. MATH (STRICT DAYZ -> IMAGE CONVERSION) ---
 def transform_coords(raw_x, raw_z, settings, map_size):
-    # 1. Swap X/Z (If needed)
+    # 1. SWAP X/Z (If log format differs)
     final_x = raw_z if settings['swap_xz'] else raw_x
     final_z = raw_x if settings['swap_xz'] else raw_z
     
-    # 2. TRANSFORM TO TOP-LEFT ORIGIN
-    # DayZ Native: 0=Bottom, 15360=Top.
-    # Image/Plotly: 0=Top, 15360=Bottom.
-    # We MUST flip Z so it matches the image visual.
+    # 2. INVERT Z (DayZ N=15360 -> Image Top=0)
+    # The image coordinate system starts at Top-Left (0,0).
+    # DayZ coordinate system starts at Bottom-Left (0,0).
+    # Therefore, Image Y = MapSize - DayZ Z.
     if settings['invert_z']: 
         final_z = map_size - final_z
 
-    # 3. Apply Offset/Scale
+    # 3. SCALE & OFFSET
     final_x = (final_x * settings['scale_factor']) + settings['off_x']
     final_z = (final_z * settings['scale_factor']) + settings['off_y']
     
     return final_x, final_z
 
-def reverse_transform(plot_x, plot_z, settings, map_size):
+def reverse_transform(plot_x, plot_y, settings, map_size):
     # Reverse Scale/Offset
     rx = (plot_x - settings['off_x']) / settings['scale_factor']
-    rz = (plot_z - settings['off_y']) / settings['scale_factor']
+    rz = (plot_y - settings['off_y']) / settings['scale_factor']
     
-    # Reverse Flip
+    # Reverse Inversion
     if settings['invert_z']: 
         rz = map_size - rz
         
@@ -146,20 +146,20 @@ def reverse_transform(plot_x, plot_z, settings, map_size):
     game_z = rx if settings['swap_xz'] else rz
     return game_x, game_z
 
-# --- 4. RENDER ENGINE (STRICT LOCKING) ---
+# --- 4. RENDER ENGINE (LOCKED ASPECT RATIO) ---
 def render_map(df, map_name, settings, search_term, custom_markers, active_layers, poi_db):
     config = MAP_CONFIG[map_name]
     map_size = config["size"]
     fig = go.Figure()
 
-    # A. IMAGE LAYER (Anchor to Top-Left)
+    # A. IMAGE LAYER (Background)
     img = load_map_image(config["image"])
     if img:
         fig.add_layout_image(
             dict(
                 source=img,
                 xref="x", yref="y",
-                x=0, y=0,  # Strict Top-Left Lock
+                x=0, y=0,           # Locked to Top-Left
                 sizex=map_size, sizey=map_size,
                 sizing="stretch",
                 opacity=1,
@@ -169,65 +169,58 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
     else:
         fig.add_shape(type="rect", x0=0, y0=0, x1=map_size, y1=map_size, line=dict(color="RoyalBlue"))
 
-    # B. GRID SYSTEM (OVERLAY)
+    # B. GRID SYSTEM (Strict Overlay)
     if settings['show_grid']:
         tick_vals = []
         tick_text = []
         
+        # 00 to 15 Loop
         for i in range(16):
-            # 00 to 15
-            val_raw = (i * 1000) + 500
+            # Calculate exact pixel position for grid line
+            raw_pos = i * 1000
             
-            # Calculate Scaled Positions
-            # X uses standard transform (0->15)
-            t_x, _ = transform_coords(val_raw, 0, settings, map_size) # We only care about X result
-            
-            # Y uses INVERTED logic (so 0 is top) if invert_z is on
-            # But for the GRID LINES themselves, we just want to draw them every 1000m pixels.
-            # We must use "Pixel Coordinates" directly relative to the image.
-            grid_pos = (i * 1000 * settings['scale_factor'])
-            
-            tick_vals.append((val_raw * settings['scale_factor']) + settings['off_x']) # Approximate tick center
+            # X-Axis Ticks (Left to Right)
+            t_x = (raw_pos * settings['scale_factor']) + settings['off_x']
+            tick_vals.append(t_x)
             tick_text.append(f"{i:02d}")
             
-            # DRAW LINES (Manual Shapes to guarantee they stay with map)
-            # Vertical Line (at X)
-            v_x = (i * 1000 * settings['scale_factor']) + settings['off_x']
-            fig.add_shape(
-                type="line", x0=v_x, y0=0, x1=v_x, y1=map_size,
-                line=dict(color="rgba(255, 255, 255, 0.3)", width=1),
-                layer="above"
-            )
-            # Horizontal Line (at Y)
-            h_y = (i * 1000 * settings['scale_factor']) + settings['off_y']
-            fig.add_shape(
-                type="line", x0=0, y0=h_y, x1=map_size, y1=h_y,
-                line=dict(color="rgba(255, 255, 255, 0.3)", width=1),
-                layer="above"
-            )
+            # Draw Grid Lines Manually to force them "Above" image
+            # Vertical
+            fig.add_shape(type="line", x0=t_x, y0=0, x1=t_x, y1=map_size,
+                          line=dict(color="rgba(255, 255, 255, 0.2)", width=1), layer="above")
+            
+            # Horizontal (Y-Axis)
+            # Since our Y-Axis is inverted (0 Top), the math is simple: 
+            # 00 is at 0px, 01 is at 1000px, etc.
+            t_y = (raw_pos * settings['scale_factor']) + settings['off_y']
+            
+            fig.add_shape(type="line", x0=0, y0=t_y, x1=map_size, y1=t_y,
+                          line=dict(color="rgba(255, 255, 255, 0.2)", width=1), layer="above")
 
-        # Configure Axes to Match Image Coordinates (0 at Top)
+        # AXIS CONFIGURATION (LOCKED)
         fig.update_xaxes(
             visible=True, range=[0, map_size], side="top",
             tickmode="array", tickvals=tick_vals, ticktext=tick_text,
             tickfont=dict(size=14, color="white", family="Arial Black"),
-            showgrid=False # We drew them manually
+            showgrid=False, zeroline=False,
+            # CRITICAL: LOCK ASPECT RATIO
+            constrain='domain'
         )
         
-        # Y-Axis: 0 at Top, map_size at Bottom
         fig.update_yaxes(
-            visible=True, range=[map_size, 0], # INVERTED RANGE FORCES 0 TO TOP
+            visible=True, range=[map_size, 0], # 0 at TOP (Standard Image Coords)
             tickmode="array", tickvals=tick_vals, ticktext=tick_text,
             tickfont=dict(size=14, color="white", family="Arial Black"),
-            showgrid=False
+            showgrid=False, zeroline=False,
+            # CRITICAL: LOCK ASPECT RATIO to X Axis so map doesn't float/squash
+            scaleanchor="x", scaleratio=1,
+            constrain='domain'
         )
-
     else:
-        # Hide Grid but keep image locked
-        fig.update_xaxes(visible=False, range=[0, map_size])
-        fig.update_yaxes(visible=False, range=[map_size, 0])
+        fig.update_xaxes(visible=False, range=[0, map_size], constrain='domain')
+        fig.update_yaxes(visible=False, range=[map_size, 0], scaleanchor="x", scaleratio=1, constrain='domain')
 
-    # C. TOWNS (Black Text)
+    # C. TOWNS
     if settings['show_towns'] and map_name in TOWN_DATA:
         t_x, t_y, t_names = [], [], []
         for town in TOWN_DATA[map_name]:
@@ -294,10 +287,10 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
             name="Logs"
         ))
 
-    # G. LAYOUT
+    # G. LAYOUT (FIXED CONTAINER)
     fig.update_layout(
-        height=800,
-        margin={"l": 30, "r": 30, "t": 30, "b": 10},
+        height=800, # Fixed height to prevent website jumping
+        margin={"l": 40, "r": 40, "t": 40, "b": 10},
         plot_bgcolor="#0e1117", paper_bgcolor="#0e1117",
         dragmode="pan" if settings['click_mode'] == "Navigate" else False,
         showlegend=True,
@@ -362,8 +355,7 @@ def main():
             settings = {
                 "use_y_as_z": st.checkbox("Fix Ocean Dots", True),
                 "swap_xz": st.checkbox("Swap X/Z", False),
-                # DEFAULT INVERT TRUE: Matches "Image is Top-Down" vs "Game is Bottom-Up"
-                "invert_z": st.checkbox("Invert Vertical", True), 
+                "invert_z": st.checkbox("Invert Vertical", True), # TRUE Default for Image Alignment
                 "off_x": st.slider("X Off", -2000, 2000, 0, 10),
                 "off_y": st.slider("Y Off", -2000, 2000, 0, 10),
                 "scale_factor": st.slider("Scale", 0.8, 1.2, 1.0, 0.005),
@@ -379,6 +371,7 @@ def main():
     
     fig, map_size = render_map(df, selected_map, settings, search_term, st.session_state['custom_markers'], active_layers, current_db)
 
+    # EVENT HANDLING
     event = st.plotly_chart(
         fig, on_select="rerun", selection_mode="points", use_container_width=True,
         config={'scrollZoom': True, 'displayModeBar': True, 'modeBarButtonsToAdd': ['zoomIn2d', 'zoomOut2d', 'resetScale2d', 'pan2d'], 'displaylogo': False}
@@ -386,16 +379,18 @@ def main():
 
     if click_mode == "🎯 Add Marker" and len(event.selection.points) > 0:
         p = event.selection.points[0]
-        gx, gz = reverse_transform(p['x'], p['y'], settings, map_size)
-        @st.dialog("Add Marker")
-        def add_marker_dialog():
-            st.write(f"Grid: {gx/1000:.1f} / {gz/1000:.1f}")
-            m_type = st.selectbox("Type", list(MARKER_ICONS.keys()))
-            m_label = st.text_input("Label")
-            if st.button("Save"):
-                st.session_state['custom_markers'].append({"type": m_type, "label": m_label, "x": gx, "z": gz})
-                st.rerun()
-        add_marker_dialog()
+        # Robust check for missing x/y in event data
+        if 'x' in p and 'y' in p:
+            gx, gz = reverse_transform(p['x'], p['y'], settings, map_size)
+            @st.dialog("Add Marker")
+            def add_marker_dialog():
+                st.write(f"Grid: {gx/1000:.1f} / {gz/1000:.1f}")
+                m_type = st.selectbox("Type", list(MARKER_ICONS.keys()))
+                m_label = st.text_input("Label")
+                if st.button("Save"):
+                    st.session_state['custom_markers'].append({"type": m_type, "label": m_label, "x": gx, "z": gz})
+                    st.rerun()
+            add_marker_dialog()
 
 if __name__ == "__main__":
     main()
