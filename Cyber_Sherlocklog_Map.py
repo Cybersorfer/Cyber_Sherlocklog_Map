@@ -57,10 +57,9 @@ MARKER_ICONS = {
     "Loot": "🎒", "POI": "📍", "Enemy": "⚔️"
 }
 
-# --- 2. OPTIMIZED DATA LOADING (CACHING) ---
+# --- 2. CACHED DATA LOADING ---
 @st.cache_resource
 def load_map_image(image_path):
-    """Loads and caches the heavy map image so it doesn't reload on clicks"""
     try:
         return Image.open(image_path)
     except Exception:
@@ -68,7 +67,6 @@ def load_map_image(image_path):
 
 @st.cache_data
 def parse_log_file_content(content_bytes):
-    """Parses logs once and caches the result"""
     logs = []
     content = content_bytes.decode("utf-8", errors='ignore')
     lines = content.split('\n')
@@ -85,7 +83,6 @@ def parse_log_file_content(content_bytes):
             time_match = time_pattern.search(line)
             
             name = name_match.group(1) if name_match else "Unknown"
-            
             log_time = None
             if time_match:
                 try:
@@ -114,29 +111,34 @@ def parse_poi_csv(uploaded_csv):
                 "name": row['name'], "x": float(row['x']), "z": float(row['z'])
             })
         return new_db
-    except Exception as e:
+    except Exception:
         return DEFAULT_POI_DATABASE
 
-# --- 3. MATH ---
+# --- 3. MATH (Unified Top-Left Coordinate System) ---
 def transform_coords(raw_x, raw_z, settings, map_size):
-    # Standard transformation
+    # 1. SWAP X/Z (If needed for DayZ logs)
     final_x = raw_z if settings['swap_xz'] else raw_x
     final_z = raw_x if settings['swap_xz'] else raw_z
     
-    # Invert Z logic (DayZ: 0 is South/Bottom, 15k is North/Top)
-    # Image: 0 is Top, 15k is Bottom
-    # So to plot DayZ coords on Image, we usually invert Z:
+    # 2. INVERT Z (DayZ 0=Bottom, Map Image 0=Top)
+    # If settings['invert_z'] is TRUE, we flip it so 0 becomes Bottom.
+    # Standard DayZ: N=15360. Standard Image: Top=0.
     if settings['invert_z']: 
         final_z = map_size - final_z
-        
+
+    # 3. SCALE & OFFSET
     final_x = (final_x * settings['scale_factor']) + settings['off_x']
     final_z = (final_z * settings['scale_factor']) + settings['off_y']
+    
     return final_x, final_z
 
 def reverse_transform(plot_x, plot_z, settings, map_size):
     rx = (plot_x - settings['off_x']) / settings['scale_factor']
     rz = (plot_z - settings['off_y']) / settings['scale_factor']
-    if settings['invert_z']: rz = map_size - rz
+    
+    if settings['invert_z']: 
+        rz = map_size - rz
+        
     game_x = rz if settings['swap_xz'] else rx
     game_z = rx if settings['swap_xz'] else rz
     return game_x, game_z
@@ -147,67 +149,71 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
     map_size = config["size"]
     fig = go.Figure()
 
-    # A. Optimized Image Loading
+    # A. IMAGE LAYER (Background)
     img = load_map_image(config["image"])
     if img:
         fig.add_layout_image(
-            dict(source=img, xref="x", yref="y", x=0, y=map_size, 
-                 sizex=map_size, sizey=map_size, sizing="stretch", 
-                 opacity=1, layer="below")
+            dict(
+                source=img,
+                xref="x", yref="y",
+                x=0, y=0,  # Anchor at Top-Left (0,0)
+                sizex=map_size, sizey=map_size,
+                sizing="stretch",
+                opacity=1,
+                layer="below",
+                yanchor="top" # CRITICAL: Ensures image hangs down from y=0
+            )
         )
     else:
         fig.add_shape(type="rect", x0=0, y0=0, x1=map_size, y1=map_size, line=dict(color="RoyalBlue"))
 
-    # B. GRID SYSTEM (FIXED: 00 TOP -> 15 BOTTOM)
+    # B. GRID & TICKS (Overlay)
     if settings['show_grid']:
         tick_vals = []
-        tick_text_x = []
-        tick_text_y = []
+        tick_text = []
         
-        # Calculate 16 grid steps
-        for i in range(16): 
-            val_center = (i * 1000) + 500
-            
-            # X-Axis: 00 (Left) -> 15 (Right)
-            t_val_x, _ = transform_coords(val_center, 0, settings, map_size)
-            tick_vals.append(t_val_x) 
-            tick_text_x.append(f"{i:02d}")
-            
-            # Y-Axis: 00 (Top) -> 15 (Bottom) (Reverse of loop index if needed, but loop i goes 0->15)
-            # If map image Y=0 is top, then index 0 should be top.
-            tick_text_y.append(f"{i:02d}") # i=0 is "00", i=15 is "15"
-
-        # Y-Axis Ticks (Vertical)
-        # We must generate tick positions that go Top -> Bottom (0 -> map_size)
-        y_tick_pos = []
+        # 1. Generate Ticks 00-15
         for i in range(16):
-            # i=0 -> 500 (Top), i=15 -> 15500 (Bottom)
-            # We map "00" to the top pixel coordinates directly
-            pixel_y = (i * 1000) + 500
-            # Apply scaling/offset if calibrating
-            final_pixel_y = (pixel_y * settings['scale_factor']) + settings['off_y']
-            y_tick_pos.append(final_pixel_y)
+            # i=0 is 00 (Top/Left), i=15 is 15 (Bottom/Right)
+            val = (i * 1000) + 500
+            
+            # X Ticks
+            t_x = (val * settings['scale_factor']) + settings['off_x']
+            tick_vals.append(t_x)
+            tick_text.append(f"{i:02d}")
+            
+            # Draw Grid Lines Manually to Ensure Overlay Visibility
+            # Vertical Line
+            fig.add_shape(
+                type="line", x0=t_x, y0=0, x1=t_x, y1=map_size,
+                line=dict(color="rgba(255, 255, 255, 0.2)", width=1, dash="solid"),
+                layer="above" # Force ON TOP of image
+            )
+            # Horizontal Line (Y)
+            t_y = (val * settings['scale_factor']) + settings['off_y']
+            fig.add_shape(
+                type="line", x0=0, y0=t_y, x1=map_size, y1=t_y,
+                line=dict(color="rgba(255, 255, 255, 0.2)", width=1, dash="solid"),
+                layer="above" # Force ON TOP of image
+            )
 
-        # X-Axis Configuration
+        # 2. Configure Axes (Labels Only)
         fig.update_xaxes(
             visible=True, range=[0, map_size], side="top",
-            tickmode="array", tickvals=tick_vals, ticktext=tick_text_x,
+            tickmode="array", tickvals=tick_vals, ticktext=tick_text,
             tickfont=dict(size=14, color="white", family="Arial Black"),
-            showgrid=True, gridcolor="rgba(255, 255, 255, 0.15)", gridwidth=1,
-            zeroline=False
+            showgrid=False, zeroline=False # We drew grid lines manually
         )
         
-        # Y-Axis Configuration (Inverted standard for image)
         fig.update_yaxes(
-            visible=True, range=[map_size, 0], # Force Plotly to display image standard (0 top, Max bottom)
-            tickmode="array", tickvals=y_tick_pos, ticktext=tick_text_y,
+            visible=True, range=[map_size, 0], # 0 at Top, map_size at Bottom
+            tickmode="array", tickvals=tick_vals, ticktext=tick_text,
             tickfont=dict(size=14, color="white", family="Arial Black"),
-            showgrid=True, gridcolor="rgba(255, 255, 255, 0.15)", gridwidth=1,
-            zeroline=False, autorange="reversed" # Essential for Image coords (0 at top)
+            showgrid=False, zeroline=False
         )
     else:
         fig.update_xaxes(visible=False, range=[0, map_size])
-        fig.update_yaxes(visible=False, range=[map_size, 0]) # Keep image orientation
+        fig.update_yaxes(visible=False, range=[map_size, 0])
 
     # C. TOWNS (Black Text)
     if settings['show_towns'] and map_name in TOWN_DATA:
@@ -218,12 +224,12 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
         
         fig.add_trace(go.Scatter(
             x=t_x, y=t_y, mode='markers+text', text=t_names, textposition="top center",
-            marker=dict(size=5, color='yellow', line=dict(width=1, color='black')),
-            textfont=dict(family="Arial Black", size=14, color="black"), 
+            marker=dict(size=6, color='yellow', line=dict(width=1, color='black')),
+            textfont=dict(family="Arial Black", size=15, color="black"), 
             hoverinfo='none', name="Towns"
         ))
 
-    # D. STATIC LAYERS
+    # D. POI LAYERS
     if map_name in poi_db:
         for layer_name, locations in poi_db[map_name].items():
             if layer_name in active_layers:
@@ -238,7 +244,7 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
                 
                 fig.add_trace(go.Scatter(
                     x=l_x, y=l_y, mode='markers',
-                    marker=dict(size=8, color=color, symbol='diamond', line=dict(width=1, color='black')),
+                    marker=dict(size=9, color=color, symbol='diamond', line=dict(width=1, color='black')),
                     text=l_txt, name=layer_name, hoverinfo='text'
                 ))
 
@@ -251,22 +257,22 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
             c_text.append(MARKER_ICONS.get(m['type'], "📍"))
 
         fig.add_trace(go.Scatter(
-            x=c_x, y=c_y, mode='text', text=c_text, textfont=dict(size=20),
+            x=c_x, y=c_y, mode='text', text=c_text, textfont=dict(size=24),
             name="Custom", hoverinfo="text", hovertext=[m['label'] for m in custom_markers]
         ))
 
-    # F. LOGS
+    # F. PLAYERS
     if not df.empty:
         raw_x = df["raw_1"]
         raw_z = df["raw_2"] if settings['use_y_as_z'] else df["raw_3"]
         fx, fz = transform_coords(raw_x, raw_z, settings, map_size)
         
         colors = ['red'] * len(df)
-        sizes = [6] * len(df)
+        sizes = [7] * len(df)
         if search_term:
             mask = df['name'].str.contains(search_term, case=False, na=False)
-            colors = ['lime' if m else 'rgba(255,0,0,0.3)' for m in mask]
-            sizes = [15 if m else 6 for m in mask]
+            colors = ['lime' if m else 'rgba(255,0,0,0.1)' for m in mask]
+            sizes = [15 if m else 5 for m in mask]
 
         fig.add_trace(go.Scatter(
             x=fx, y=fz, mode='markers',
@@ -278,16 +284,16 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
 
     # G. LAYOUT
     fig.update_layout(
-        width=900, height=800,
-        margin={"l": 40, "r": 40, "t": 40, "b": 20},
+        height=800,
+        margin={"l": 30, "r": 30, "t": 30, "b": 10},
         plot_bgcolor="#0e1117", paper_bgcolor="#0e1117",
         dragmode="pan" if settings['click_mode'] == "Navigate" else False,
         showlegend=True,
-        legend=dict(yanchor="top", y=0.85, xanchor="right", x=0.99, bgcolor="rgba(0,0,0,0.5)", font=dict(color="white"))
+        legend=dict(yanchor="top", y=0.95, xanchor="right", x=0.99, bgcolor="rgba(0,0,0,0.6)", font=dict(color="white"))
     )
     return fig, map_size
 
-# --- 5. MAIN UI ---
+# --- 5. UI MAIN ---
 def main():
     if 'custom_markers' not in st.session_state: st.session_state['custom_markers'] = []
     
@@ -297,12 +303,8 @@ def main():
         [data-testid="stSidebar"] { background-color: #262730; }
         [data-testid="stSidebar"] h1, [data-testid="stSidebar"] h2, [data-testid="stSidebar"] h3,
         [data-testid="stSidebar"] label, [data-testid="stSidebar"] p, 
-        [data-testid="stSidebar"] div[role="radiogroup"] p, 
-        [data-testid="stFileUploader"] small, .streamlit-expanderHeader p {
-            color: #cccccc !important;
-        }
+        [data-testid="stFileUploader"] small, .streamlit-expanderHeader p { color: #cccccc !important; }
         .block-container { padding-top: 1rem !important; }
-        div[data-baseweb="select"] > div { background-color: #404040 !important; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -316,14 +318,12 @@ def main():
         
         if uploaded_csv:
             current_db = parse_poi_csv(uploaded_csv)
-            st.success("✅ Custom Database Loaded")
+            st.success("✅ Custom Database")
         else:
             current_db = DEFAULT_POI_DATABASE
 
-        # LOG PARSING (Cached)
         df = parse_log_file_content(uploaded_log.getvalue()) if uploaded_log else pd.DataFrame()
 
-        # TIME FILTER
         if not df.empty and 'time_obj' in df.columns:
             valid_times = df.dropna(subset=['time_obj'])
             if not valid_times.empty:
@@ -331,7 +331,7 @@ def main():
                 st.subheader("⏳ Time Filter")
                 min_t, max_t = valid_times['time_obj'].min(), valid_times['time_obj'].max()
                 if min_t != max_t:
-                    start_time, end_time = st.slider("Event Window", value=(min_t, max_t), format="HH:mm:ss")
+                    start_time, end_time = st.slider("Window", value=(min_t, max_t), format="HH:mm:ss")
                     df = df[(df['time_obj'] >= start_time) & (df['time_obj'] <= end_time)]
 
         st.markdown("---")
@@ -350,7 +350,7 @@ def main():
             settings = {
                 "use_y_as_z": st.checkbox("Fix Ocean Dots", True),
                 "swap_xz": st.checkbox("Swap X/Z", False),
-                "invert_z": st.checkbox("Invert Vertical", True), # Default to TRUE for proper image alignment
+                "invert_z": st.checkbox("Invert Vertical", True),
                 "off_x": st.slider("X Off", -2000, 2000, 0, 10),
                 "off_y": st.slider("Y Off", -2000, 2000, 0, 10),
                 "scale_factor": st.slider("Scale", 0.8, 1.2, 1.0, 0.005),
@@ -364,10 +364,8 @@ def main():
     col1, col2 = st.columns([0.85, 0.15])
     with col1: st.subheader(f"📍 {selected_map}")
     
-    # RENDER
     fig, map_size = render_map(df, selected_map, settings, search_term, st.session_state['custom_markers'], active_layers, current_db)
 
-    # FAST SELECTION HANDLING
     event = st.plotly_chart(
         fig, on_select="rerun", selection_mode="points", use_container_width=True,
         config={'scrollZoom': True, 'displayModeBar': True, 'modeBarButtonsToAdd': ['zoomIn2d', 'zoomOut2d', 'resetScale2d', 'pan2d'], 'displaylogo': False}
