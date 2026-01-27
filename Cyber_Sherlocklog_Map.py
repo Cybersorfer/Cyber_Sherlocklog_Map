@@ -20,7 +20,6 @@ MAP_CONFIG = {
     }
 }
 
-# Database of Town Coordinates
 TOWN_DATA = {
     "Chernarus": [
         {"name": "NWAF", "x": 4600, "z": 10200},
@@ -118,7 +117,7 @@ def render_map(df, map_name, swap_xz, invert_z, use_y_as_z, off_x, off_y, scale_
         final_z = (final_z * scale_factor) + off_y
         return final_x, final_z
 
-    # -- C. Plot Towns (Yellow Markers + Black Text) --
+    # -- C. Plot Towns --
     if show_towns and map_name in TOWN_DATA:
         towns = TOWN_DATA[map_name]
         t_x, t_y, t_names = [], [], []
@@ -132,19 +131,11 @@ def render_map(df, map_name, swap_xz, invert_z, use_y_as_z, off_x, off_y, scale_
         fig.add_trace(go.Scatter(
             x=t_x,
             y=t_y,
-            mode='markers+text', # Dots AND Text
+            mode='markers+text',
             text=t_names,
-            textposition="top center", # Text sits above dot
-            marker=dict(
-                size=8, 
-                color='yellow', # Restored Yellow Dots
-                line=dict(width=1, color='black') # Small black outline for visibility
-            ),
-            textfont=dict(
-                family="Arial Black",
-                size=12,
-                color="black" # Requested Black Text
-            ),
+            textposition="top center",
+            marker=dict(size=8, color='yellow', line=dict(width=1, color='black')),
+            textfont=dict(family="Arial Black", size=12, color="black"),
             hoverinfo='skip',
             name="Locations"
         ))
@@ -175,7 +166,7 @@ def render_map(df, map_name, swap_xz, invert_z, use_y_as_z, off_x, off_y, scale_
             )
         )
 
-    # -- E. Lock Axes --
+    # -- E. Lock Axes & Dark Theme --
     fig.update_xaxes(range=[0, map_size], visible=False, showgrid=False)
     fig.update_yaxes(range=[0, map_size], visible=False, showgrid=False)
 
@@ -183,12 +174,22 @@ def render_map(df, map_name, swap_xz, invert_z, use_y_as_z, off_x, off_y, scale_
         width=900,
         height=900,
         margin={"l": 0, "r": 0, "t": 0, "b": 0},
-        plot_bgcolor="#0e1117", 
+        plot_bgcolor="#0e1117",  # Plot area background
+        paper_bgcolor="#0e1117", # Whole figure background (Removes white border)
         dragmode="pan",
         showlegend=False
     )
 
-    st.plotly_chart(fig, use_container_width=True)
+    # -- F. Render with Scroll Zoom Enabled --
+    st.plotly_chart(
+        fig, 
+        use_container_width=True, 
+        config={
+            'scrollZoom': True,       # Enables Mouse Wheel Zoom
+            'displayModeBar': False,  # Hides the floating toolbar for cleaner look
+            'staticPlot': False
+        }
+    )
 
 # --- 4. MAIN INTERFACE ---
 def main():
@@ -202,11 +203,19 @@ def main():
             background-color: #0e1117;
             color: #fafafa;
         }
+        
+        /* Remove Top White Gap (Streamlit Padding) */
+        .block-container {
+            padding-top: 2rem !important; 
+            padding-bottom: 0rem !important;
+        }
+
         /* Sidebar Background */
         [data-testid="stSidebar"] {
             background-color: #262730;
             color: #fafafa;
         }
+        
         /* Button Styling */
         .stButton>button {
             color: #ffffff;
@@ -217,22 +226,25 @@ def main():
             color: #ffffff;
             background-color: #45a049;
         }
+        
         /* Widgets Text Color */
         .stSelectbox label, .stCheckbox label, .stSlider label {
             color: #fafafa !important;
         }
+        
         /* FILE UPLOADER DARK THEME */
         [data-testid="stFileUploader"] {
-            background-color: #262730; /* Dark box background */
+            background-color: #262730; 
             border-radius: 5px;
             padding: 10px;
         }
         [data-testid="stFileUploader"] section {
-            background-color: #363940 !important; /* The drop zone itself */
+            background-color: #363940 !important;
         }
         [data-testid="stFileUploader"] div, [data-testid="stFileUploader"] span, [data-testid="stFileUploader"] small {
-            color: #fafafa !important; /* Force white text in uploader */
+            color: #fafafa !important;
         }
+        
         /* Input Box Styling */
         div[data-baseweb="select"] > div {
             background-color: #404040 !important;
@@ -255,7 +267,6 @@ def main():
         st.markdown("---")
         st.header("🔧 Calibrator")
         
-        # Confirmed Calibration Defaults
         use_y_as_z = st.checkbox("Fix: Dots in Ocean? (Use 2nd num as North)", value=True)
         swap_xz = st.checkbox("Swap X/Z Axis", value=False)
         invert_z = st.checkbox("Invert Vertical (Flip N/S)", value=False)
