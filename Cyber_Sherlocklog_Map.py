@@ -114,28 +114,31 @@ def parse_poi_csv(uploaded_csv):
     except Exception:
         return DEFAULT_POI_DATABASE
 
-# --- 3. MATH (Unified Top-Left Coordinate System) ---
+# --- 3. MATH (STRICT TOP-LEFT ORIGIN) ---
 def transform_coords(raw_x, raw_z, settings, map_size):
-    # 1. SWAP X/Z (If needed for DayZ logs)
+    # 1. Swap X/Z (If needed)
     final_x = raw_z if settings['swap_xz'] else raw_x
     final_z = raw_x if settings['swap_xz'] else raw_z
     
-    # 2. INVERT Z (DayZ 0=Bottom, Map Image 0=Top)
-    # If settings['invert_z'] is TRUE, we flip it so 0 becomes Bottom.
-    # Standard DayZ: N=15360. Standard Image: Top=0.
+    # 2. TRANSFORM TO TOP-LEFT ORIGIN
+    # DayZ Native: 0=Bottom, 15360=Top.
+    # Image/Plotly: 0=Top, 15360=Bottom.
+    # We MUST flip Z so it matches the image visual.
     if settings['invert_z']: 
         final_z = map_size - final_z
 
-    # 3. SCALE & OFFSET
+    # 3. Apply Offset/Scale
     final_x = (final_x * settings['scale_factor']) + settings['off_x']
     final_z = (final_z * settings['scale_factor']) + settings['off_y']
     
     return final_x, final_z
 
 def reverse_transform(plot_x, plot_z, settings, map_size):
+    # Reverse Scale/Offset
     rx = (plot_x - settings['off_x']) / settings['scale_factor']
     rz = (plot_z - settings['off_y']) / settings['scale_factor']
     
+    # Reverse Flip
     if settings['invert_z']: 
         rz = map_size - rz
         
@@ -143,75 +146,84 @@ def reverse_transform(plot_x, plot_z, settings, map_size):
     game_z = rx if settings['swap_xz'] else rz
     return game_x, game_z
 
-# --- 4. RENDER ENGINE ---
+# --- 4. RENDER ENGINE (STRICT LOCKING) ---
 def render_map(df, map_name, settings, search_term, custom_markers, active_layers, poi_db):
     config = MAP_CONFIG[map_name]
     map_size = config["size"]
     fig = go.Figure()
 
-    # A. IMAGE LAYER (Background)
+    # A. IMAGE LAYER (Anchor to Top-Left)
     img = load_map_image(config["image"])
     if img:
         fig.add_layout_image(
             dict(
                 source=img,
                 xref="x", yref="y",
-                x=0, y=0,  # Anchor at Top-Left (0,0)
+                x=0, y=0,  # Strict Top-Left Lock
                 sizex=map_size, sizey=map_size,
                 sizing="stretch",
                 opacity=1,
-                layer="below",
-                yanchor="top" # CRITICAL: Ensures image hangs down from y=0
+                layer="below"
             )
         )
     else:
         fig.add_shape(type="rect", x0=0, y0=0, x1=map_size, y1=map_size, line=dict(color="RoyalBlue"))
 
-    # B. GRID & TICKS (Overlay)
+    # B. GRID SYSTEM (OVERLAY)
     if settings['show_grid']:
         tick_vals = []
         tick_text = []
         
-        # 1. Generate Ticks 00-15
         for i in range(16):
-            # i=0 is 00 (Top/Left), i=15 is 15 (Bottom/Right)
-            val = (i * 1000) + 500
+            # 00 to 15
+            val_raw = (i * 1000) + 500
             
-            # X Ticks
-            t_x = (val * settings['scale_factor']) + settings['off_x']
-            tick_vals.append(t_x)
+            # Calculate Scaled Positions
+            # X uses standard transform (0->15)
+            t_x, _ = transform_coords(val_raw, 0, settings, map_size) # We only care about X result
+            
+            # Y uses INVERTED logic (so 0 is top) if invert_z is on
+            # But for the GRID LINES themselves, we just want to draw them every 1000m pixels.
+            # We must use "Pixel Coordinates" directly relative to the image.
+            grid_pos = (i * 1000 * settings['scale_factor'])
+            
+            tick_vals.append((val_raw * settings['scale_factor']) + settings['off_x']) # Approximate tick center
             tick_text.append(f"{i:02d}")
             
-            # Draw Grid Lines Manually to Ensure Overlay Visibility
-            # Vertical Line
+            # DRAW LINES (Manual Shapes to guarantee they stay with map)
+            # Vertical Line (at X)
+            v_x = (i * 1000 * settings['scale_factor']) + settings['off_x']
             fig.add_shape(
-                type="line", x0=t_x, y0=0, x1=t_x, y1=map_size,
-                line=dict(color="rgba(255, 255, 255, 0.2)", width=1, dash="solid"),
-                layer="above" # Force ON TOP of image
+                type="line", x0=v_x, y0=0, x1=v_x, y1=map_size,
+                line=dict(color="rgba(255, 255, 255, 0.3)", width=1),
+                layer="above"
             )
-            # Horizontal Line (Y)
-            t_y = (val * settings['scale_factor']) + settings['off_y']
+            # Horizontal Line (at Y)
+            h_y = (i * 1000 * settings['scale_factor']) + settings['off_y']
             fig.add_shape(
-                type="line", x0=0, y0=t_y, x1=map_size, y1=t_y,
-                line=dict(color="rgba(255, 255, 255, 0.2)", width=1, dash="solid"),
-                layer="above" # Force ON TOP of image
+                type="line", x0=0, y0=h_y, x1=map_size, y1=h_y,
+                line=dict(color="rgba(255, 255, 255, 0.3)", width=1),
+                layer="above"
             )
 
-        # 2. Configure Axes (Labels Only)
+        # Configure Axes to Match Image Coordinates (0 at Top)
         fig.update_xaxes(
             visible=True, range=[0, map_size], side="top",
             tickmode="array", tickvals=tick_vals, ticktext=tick_text,
             tickfont=dict(size=14, color="white", family="Arial Black"),
-            showgrid=False, zeroline=False # We drew grid lines manually
+            showgrid=False # We drew them manually
         )
         
+        # Y-Axis: 0 at Top, map_size at Bottom
         fig.update_yaxes(
-            visible=True, range=[map_size, 0], # 0 at Top, map_size at Bottom
+            visible=True, range=[map_size, 0], # INVERTED RANGE FORCES 0 TO TOP
             tickmode="array", tickvals=tick_vals, ticktext=tick_text,
             tickfont=dict(size=14, color="white", family="Arial Black"),
-            showgrid=False, zeroline=False
+            showgrid=False
         )
+
     else:
+        # Hide Grid but keep image locked
         fig.update_xaxes(visible=False, range=[0, map_size])
         fig.update_yaxes(visible=False, range=[map_size, 0])
 
@@ -225,7 +237,7 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
         fig.add_trace(go.Scatter(
             x=t_x, y=t_y, mode='markers+text', text=t_names, textposition="top center",
             marker=dict(size=6, color='yellow', line=dict(width=1, color='black')),
-            textfont=dict(family="Arial Black", size=15, color="black"), 
+            textfont=dict(family="Arial Black", size=14, color="black"), 
             hoverinfo='none', name="Towns"
         ))
 
@@ -350,7 +362,8 @@ def main():
             settings = {
                 "use_y_as_z": st.checkbox("Fix Ocean Dots", True),
                 "swap_xz": st.checkbox("Swap X/Z", False),
-                "invert_z": st.checkbox("Invert Vertical", True),
+                # DEFAULT INVERT TRUE: Matches "Image is Top-Down" vs "Game is Bottom-Up"
+                "invert_z": st.checkbox("Invert Vertical", True), 
                 "off_x": st.slider("X Off", -2000, 2000, 0, 10),
                 "off_y": st.slider("Y Off", -2000, 2000, 0, 10),
                 "scale_factor": st.slider("Scale", 0.8, 1.2, 1.0, 0.005),
