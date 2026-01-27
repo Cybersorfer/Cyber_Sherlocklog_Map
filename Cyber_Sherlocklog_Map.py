@@ -11,41 +11,32 @@ MAP_CONFIG = {
     "Sakhal": {"size": 8192, "image": "map_sakhal.png"}
 }
 
-# Icon Mapping for Markers
+# --- STATIC INTEL (Example POIs) ---
+POI_DATABASE = {
+    "Chernarus": {
+        "🛡️ Military": [
+            {"name": "NWAF", "x": 4600, "z": 10200},
+            {"name": "Tisy", "x": 1700, "z": 14000},
+            {"name": "VMC", "x": 4500, "z": 8300},
+            {"name": "Balota AF", "x": 4400, "z": 2400},
+        ],
+        "🏰 Castles": [
+            {"name": "Devil's Castle", "x": 6800, "z": 11500},
+            {"name": "Zub", "x": 6500, "z": 3200},
+            {"name": "Rog", "x": 11200, "z": 4300},
+        ],
+        "💧 Water": [
+            {"name": "Mogilevka Well", "x": 7500, "z": 5000},
+        ]
+    }
+}
+
 MARKER_ICONS = {
-    "Base": "🏠",
-    "Vehicle": "🚗",
-    "Body": "💀",
-    "Loot": "🎒",
-    "POI": "📍",
-    "Enemy": "⚔️"
+    "Base": "🏠", "Vehicle": "🚗", "Body": "💀", 
+    "Loot": "🎒", "POI": "📍", "Enemy": "⚔️"
 }
 
-TOWN_DATA = {
-    "Chernarus": [
-        {"name": "NWAF", "x": 4600, "z": 10200},
-        {"name": "Stary Sobor", "x": 6050, "z": 7750},
-        {"name": "Novy Sobor", "x": 7100, "z": 7700},
-        {"name": "Vybor", "x": 3750, "z": 8900},
-        {"name": "Gorka", "x": 9500, "z": 8850},
-        {"name": "Chernogorsk", "x": 6650, "z": 2600},
-        {"name": "Elektrozavodsk", "x": 10450, "z": 2300},
-        {"name": "Berezino", "x": 12400, "z": 9700},
-        {"name": "Zelenogorsk", "x": 2750, "z": 5300},
-        {"name": "Severograd", "x": 8400, "z": 13700},
-        {"name": "Tisy", "x": 1700, "z": 14000},
-        {"name": "Krasnostav", "x": 11200, "z": 12300},
-        {"name": "Balota", "x": 4400, "z": 2400}
-    ],
-    "Livonia": [
-        {"name": "Topolin", "x": 6200, "z": 11000},
-        {"name": "Brena", "x": 6300, "z": 11800},
-        {"name": "Nadbor", "x": 5600, "z": 4500}
-    ],
-    "Sakhal": []
-}
-
-# --- 2. LOG PARSING ENGINE ---
+# --- 2. LOG PARSING ---
 def parse_log_file(uploaded_file):
     logs = []
     content = uploaded_file.getvalue().decode("utf-8", errors='ignore')
@@ -61,50 +52,35 @@ def parse_log_file(uploaded_file):
             name = name_match.group(1) if name_match else "Unknown"
             logs.append({
                 "name": name,
-                "raw_1": float(v1),
-                "raw_2": float(v2),
-                "raw_3": float(v3),
+                "raw_1": float(v1), "raw_2": float(v2), "raw_3": float(v3),
                 "activity": line.strip()[:150] 
             })
     return pd.DataFrame(logs)
 
-# --- 3. COORDINATE MATH ---
+# --- 3. MATH ---
 def transform_coords(raw_x, raw_z, settings, map_size):
-    """Convert Game Coords -> Map Plot Coords"""
     final_x = raw_z if settings['swap_xz'] else raw_x
     final_z = raw_x if settings['swap_xz'] else raw_z
-    
-    if settings['invert_z']:
-        final_z = map_size - final_z
-        
+    if settings['invert_z']: final_z = map_size - final_z
     final_x = (final_x * settings['scale_factor']) + settings['off_x']
     final_z = (final_z * settings['scale_factor']) + settings['off_y']
     return final_x, final_z
 
 def reverse_transform(plot_x, plot_z, settings, map_size):
-    """Convert Map Plot Coords -> Game Coords (For clicking)"""
-    # 1. Reverse Offset & Scale
     rx = (plot_x - settings['off_x']) / settings['scale_factor']
     rz = (plot_z - settings['off_y']) / settings['scale_factor']
-    
-    # 2. Reverse Invert
-    if settings['invert_z']:
-        rz = map_size - rz
-        
-    # 3. Reverse Swap
+    if settings['invert_z']: rz = map_size - rz
     game_x = rz if settings['swap_xz'] else rx
     game_z = rx if settings['swap_xz'] else rz
-    
     return game_x, game_z
 
-# --- 4. MAP RENDERING ENGINE ---
-def render_map(df, map_name, settings, search_term, custom_markers):
+# --- 4. RENDER ENGINE ---
+def render_map(df, map_name, settings, search_term, custom_markers, active_layers):
     config = MAP_CONFIG[map_name]
     map_size = config["size"]
-    
     fig = go.Figure()
 
-    # -- A. Load Map Image --
+    # A. Map Image
     try:
         img = Image.open(config["image"])
         fig.add_layout_image(
@@ -112,118 +88,154 @@ def render_map(df, map_name, settings, search_term, custom_markers):
                  sizex=map_size, sizey=map_size, sizing="stretch", 
                  opacity=1, layer="below")
         )
-    except Exception:
-        # Fallback grid if image fails
-        fig.add_shape(type="rect", x0=0, y0=0, x1=map_size, y1=map_size, 
-                      line=dict(color="RoyalBlue"), fillcolor="black")
+    except:
+        fig.add_shape(type="rect", x0=0, y0=0, x1=map_size, y1=map_size, line=dict(color="RoyalBlue"))
 
-    # -- B. Plot Towns --
-    if settings['show_towns'] and map_name in TOWN_DATA:
-        t_x, t_y, t_names = [], [], []
-        hits_x, hits_y = [], []
-        
-        for town in TOWN_DATA[map_name]:
-            tx, ty = transform_coords(town['x'], town['z'], settings, map_size)
-            t_x.append(tx); t_y.append(ty); t_names.append(town['name'])
-            
-            if search_term and search_term.lower() in town['name'].lower():
-                hits_x.append(tx); hits_y.append(ty)
+    # B. GRID SYSTEM
+    if settings['show_grid']:
+        for i in range(0, int(map_size), 1000):
+            t_val = (i * settings['scale_factor']) + settings['off_x']
+            fig.add_shape(type="line", x0=t_val, y0=0, x1=t_val, y1=map_size,
+                          line=dict(color="rgba(255, 255, 255, 0.2)", width=1, dash="dot"))
+            t_val_y = (i * settings['scale_factor']) + settings['off_y']
+            fig.add_shape(type="line", x0=0, y0=t_val_y, x1=map_size, y1=t_val_y,
+                          line=dict(color="rgba(255, 255, 255, 0.2)", width=1, dash="dot"))
 
-        fig.add_trace(go.Scatter(
-            x=t_x, y=t_y, mode='markers+text', text=t_names, textposition="top center",
-            marker=dict(size=6, color='yellow', line=dict(width=1, color='black')),
-            textfont=dict(size=10, color="black"), hoverinfo='none', name="Towns"
-        ))
-        
-        if hits_x:
-            fig.add_trace(go.Scatter(
-                x=hits_x, y=hits_y, mode='markers', 
-                marker=dict(size=25, color='rgba(0, 255, 0, 0.4)', line=dict(width=2, color='lime')),
-                name="Search Hit", hoverinfo='skip'
-            ))
+    # C. STATIC LAYERS
+    if map_name in POI_DATABASE:
+        for layer_name, locations in POI_DATABASE[map_name].items():
+            if layer_name in active_layers:
+                l_x, l_y, l_txt = [], [], []
+                for loc in locations:
+                    tx, ty = transform_coords(loc['x'], loc['z'], settings, map_size)
+                    l_x.append(tx); l_y.append(ty); l_txt.append(loc['name'])
+                
+                color = "red" if "Military" in layer_name else "purple" if "Castle" in layer_name else "cyan"
+                fig.add_trace(go.Scatter(
+                    x=l_x, y=l_y, mode='markers',
+                    marker=dict(size=10, color=color, symbol='diamond', line=dict(width=1, color='black')),
+                    text=l_txt, name=layer_name, hoverinfo='text'
+                ))
 
-    # -- C. Plot Custom Markers (Icons) --
+    # D. CUSTOM MARKERS
     if custom_markers:
-        c_x, c_y, c_text, c_hover = [], [], [], []
+        c_x, c_y, c_text = [], [], []
         for m in custom_markers:
             cx, cy = transform_coords(m['x'], m['z'], settings, map_size)
-            icon = MARKER_ICONS.get(m['type'], "📍")
-            
-            c_x.append(cx)
-            c_y.append(cy)
-            c_text.append(icon) # The Emoji on the map
-            c_hover.append(f"{m['type']}: {m['label']}")
+            c_x.append(cx); c_y.append(cy)
+            c_text.append(MARKER_ICONS.get(m['type'], "📍"))
 
         fig.add_trace(go.Scatter(
-            x=c_x, y=c_y, mode='text', 
-            text=c_text, 
-            textfont=dict(size=20), # Large Emojis
-            name="Markers",
-            textposition="middle center",
-            hovertext=c_hover,
-            hoverinfo="text"
+            x=c_x, y=c_y, mode='text', text=c_text, textfont=dict(size=20),
+            name="Custom", hoverinfo="text", hovertext=[m['label'] for m in custom_markers]
         ))
 
-    # -- D. Plot Players --
+    # E. PLAYERS (LOGS)
     if not df.empty:
-        # Determine X and Z columns based on fix
         raw_x = df["raw_1"]
         raw_z = df["raw_2"] if settings['use_y_as_z'] else df["raw_3"]
+        fx, fz = transform_coords(raw_x, raw_z, settings, map_size)
         
-        final_x, final_z = transform_coords(raw_x, raw_z, settings, map_size)
+        colors = ['red'] * len(df)
+        sizes = [6] * len(df)
+        if search_term:
+            mask = df['name'].str.contains(search_term, case=False, na=False)
+            colors = ['lime' if m else 'rgba(255,0,0,0.3)' for m in mask]
+            sizes = [15 if m else 6 for m in mask]
 
         fig.add_trace(go.Scatter(
-            x=final_x, y=final_z, mode='markers',
-            marker=dict(size=6, color='red', line=dict(width=1, color='white')),
+            x=fx, y=fz, mode='markers',
+            marker=dict(size=sizes, color=colors, line=dict(width=1, color='white')),
             text=df["name"], customdata=df["activity"],
             hovertemplate="<b>%{text}</b><br>%{customdata}<extra></extra>",
-            name="Players"
+            name="Logs"
         ))
 
-    # -- E. Layout & Tools --
-    fig.update_xaxes(range=[0, map_size], visible=False, fixedrange=False)
-    fig.update_yaxes(range=[0, map_size], visible=False, fixedrange=False)
-
+    # F. LAYOUT
     fig.update_layout(
         width=900, height=800,
         margin={"l": 0, "r": 0, "t": 0, "b": 0},
         plot_bgcolor="#0e1117", paper_bgcolor="#0e1117",
-        dragmode="pan" if settings['click_mode'] == "Navigate" else False, # Disable pan if in Click Mode
+        dragmode="pan" if settings['click_mode'] == "Navigate" else False,
         showlegend=True,
         legend=dict(y=0.99, x=0.99, bgcolor="rgba(0,0,0,0.5)", font=dict(color="white"))
     )
+    fig.update_xaxes(visible=False, range=[0, map_size]); fig.update_yaxes(visible=False, range=[0, map_size])
     
     return fig, map_size
 
-# --- 5. MAIN APP ---
+# --- 5. MAIN UI ---
 def main():
     st.set_page_config(layout="wide", page_title="DayZ Intel Mapper")
-
-    # Session State Init
     if 'custom_markers' not in st.session_state: st.session_state['custom_markers'] = []
     
-    # Styling
+    # --- CSS: LIGHT GRAY SIDEBAR TEXT ---
     st.markdown("""
     <style>
+        /* Main Background */
         .stApp { background-color: #0e1117; color: #fafafa; }
-        .block-container { padding-top: 1rem !important; }
+        
+        /* Sidebar Background */
         [data-testid="stSidebar"] { background-color: #262730; }
+
+        /* SIDEBAR TEXT TARGETING - ALL LIGHT GRAY */
+        /* Titles (h1, h2, h3) */
+        [data-testid="stSidebar"] h1, 
+        [data-testid="stSidebar"] h2, 
+        [data-testid="stSidebar"] h3 {
+            color: #cccccc !important;
+        }
+        
+        /* Widget Labels (Map, Upload, etc.) */
+        [data-testid="stSidebar"] label {
+            color: #cccccc !important;
+        }
+
+        /* Radio Button Options (Navigate, Add Marker) */
+        [data-testid="stSidebar"] div[role="radiogroup"] p {
+             color: #cccccc !important;
+        }
+        
+        /* File Uploader Small Text (Drag and drop...) */
+        [data-testid="stFileUploader"] small {
+             color: #cccccc !important;
+        }
+        
+        /* Normal Text (Markers List) */
+        [data-testid="stSidebar"] p {
+             color: #cccccc !important;
+        }
+
+        /* Expander Title (Calibration) */
+        [data-testid="stSidebar"] .streamlit-expanderHeader p {
+             color: #cccccc !important;
+        }
+        
+        /* Top Spacing Fix */
+        .block-container { padding-top: 1rem !important; }
         div[data-baseweb="select"] > div { background-color: #404040 !important; }
     </style>
     """, unsafe_allow_html=True)
 
-    # --- SIDEBAR ---
     with st.sidebar:
         st.title("🗺️ Intel Control")
         selected_map = st.selectbox("Map", list(MAP_CONFIG.keys()))
-        uploaded_file = st.file_uploader("Upload Logs", type=['adm', 'rpt', 'log'])
+        uploaded_file = st.file_uploader("Upload Logs", type=['adm', 'rpt'])
         
         st.markdown("---")
-        # MODE SWITCHER
+        st.subheader("👁️ Layers")
+        available_layers = POI_DATABASE.get(selected_map, {}).keys()
+        active_layers = []
+        for layer in available_layers:
+            if st.checkbox(layer, value=True):
+                active_layers.append(layer)
+        
+        show_grid = st.checkbox("Show 1km Grid", value=True)
+
+        st.markdown("---")
         click_mode = st.radio("🖱️ Mouse Mode", ["Navigate", "🎯 Add Marker"], horizontal=True)
-        search_term = st.text_input("🔍 Search", placeholder="Town or Player")
+        search_term = st.text_input("🔍 Search", placeholder="Player Name...")
         
-        st.markdown("---")
         with st.expander("⚙️ Calibration"):
             settings = {
                 "use_y_as_z": st.checkbox("Fix Ocean Dots", True),
@@ -232,75 +244,42 @@ def main():
                 "off_x": st.slider("X Off", -2000, 2000, 0, 10),
                 "off_y": st.slider("Y Off", -2000, 2000, 0, 10),
                 "scale_factor": st.slider("Scale", 0.8, 1.2, 1.0, 0.005),
-                "show_towns": st.checkbox("Towns", True),
-                "click_mode": click_mode
+                "click_mode": click_mode,
+                "show_grid": show_grid
             }
-        
-        # Markers List
+            
         if st.session_state['custom_markers']:
             st.markdown("---")
             st.write(f"**Markers ({len(st.session_state['custom_markers'])})**")
-            if st.button("Clear All Markers"):
+            if st.button("Clear Markers"):
                 st.session_state['custom_markers'] = []
                 st.rerun()
 
-    # --- MAIN CONTENT ---
+    # MAIN
     col1, col2 = st.columns([0.85, 0.15])
-    with col1:
-        st.subheader(f"📍 {selected_map} | Mode: {click_mode}")
+    with col1: st.subheader(f"📍 {selected_map}")
     
-    # 1. Parse Data
     df = parse_log_file(uploaded_file) if uploaded_file else pd.DataFrame()
-    if not df.empty and search_term:
-        matches = df[df['name'].str.contains(search_term, case=False, na=False)]
-        if not matches.empty: st.info(f"Found {len(matches)} player logs matching search.")
+    fig, map_size = render_map(df, selected_map, settings, search_term, st.session_state['custom_markers'], active_layers)
 
-    # 2. Render Map
-    fig, map_size = render_map(df, selected_map, settings, search_term, st.session_state['custom_markers'])
-
-    # 3. Display Map with Click Detection
-    # 'on_select="rerun"' enables the click interaction
     event = st.plotly_chart(
-        fig, 
-        on_select="rerun",
-        selection_mode="points",
-        use_container_width=True,
-        config={
-            'scrollZoom': True, 
-            'displayModeBar': True,
-            # Enable the specific tools requested
-            'modeBarButtonsToAdd': ['zoomIn2d', 'zoomOut2d', 'resetScale2d', 'pan2d'],
-            'displaylogo': False
-        }
+        fig, on_select="rerun", selection_mode="points", use_container_width=True,
+        config={'scrollZoom': True, 'displayModeBar': True, 'modeBarButtonsToAdd': ['zoomIn2d', 'zoomOut2d', 'resetScale2d', 'pan2d'], 'displaylogo': False}
     )
 
-    # 4. HANDLE CLICKS (Add Marker Logic)
     if click_mode == "🎯 Add Marker" and len(event.selection.points) > 0:
-        # Get click coordinates (Plot Coordinates)
-        clicked_point = event.selection.points[0]
-        plot_x = clicked_point['x']
-        plot_y = clicked_point['y']
+        p = event.selection.points[0]
+        gx, gz = reverse_transform(p['x'], p['y'], settings, map_size)
         
-        # Convert back to Game Coordinates
-        gx, gz = reverse_transform(plot_x, plot_y, settings, map_size)
-        
-        # Show Dialog to Add Marker
-        @st.dialog("Add New Marker")
-        def add_marker_dialog(ix, iz):
-            st.write(f"📍 Location: {ix:.0f}, {iz:.0f}")
+        @st.dialog("Add Marker")
+        def add_marker_dialog():
+            st.write(f"Grid: {gx/1000:.1f} / {gz/1000:.1f}")
             m_type = st.selectbox("Type", list(MARKER_ICONS.keys()))
-            m_label = st.text_input("Label", placeholder="e.g. Main Base")
-            
-            if st.button("Save Marker"):
-                st.session_state['custom_markers'].append({
-                    "type": m_type,
-                    "label": m_label,
-                    "x": ix,
-                    "z": iz
-                })
+            m_label = st.text_input("Label")
+            if st.button("Save"):
+                st.session_state['custom_markers'].append({"type": m_type, "label": m_label, "x": gx, "z": gz})
                 st.rerun()
-
-        add_marker_dialog(gx, gz)
+        add_marker_dialog()
 
 if __name__ == "__main__":
     main()
