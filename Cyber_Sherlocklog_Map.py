@@ -57,7 +57,7 @@ MARKER_ICONS = {
     "Loot": "🎒", "POI": "📍", "Enemy": "⚔️"
 }
 
-# --- 2. CACHED DATA LOADING (SPEED OPTIMIZATION) ---
+# --- 2. CACHED LOADERS ---
 @st.cache_resource
 def load_map_image(image_path):
     try:
@@ -114,31 +114,26 @@ def parse_poi_csv(uploaded_csv):
     except Exception:
         return DEFAULT_POI_DATABASE
 
-# --- 3. MATH (STRICT DAYZ -> IMAGE CONVERSION) ---
+# --- 3. MATH ---
 def transform_coords(raw_x, raw_z, settings, map_size):
-    # 1. SWAP X/Z (If log format differs)
+    # Swap X/Z
     final_x = raw_z if settings['swap_xz'] else raw_x
     final_z = raw_x if settings['swap_xz'] else raw_z
     
-    # 2. INVERT Z (DayZ N=15360 -> Image Top=0)
-    # The image coordinate system starts at Top-Left (0,0).
-    # DayZ coordinate system starts at Bottom-Left (0,0).
-    # Therefore, Image Y = MapSize - DayZ Z.
+    # Invert Z (DayZ N=Max -> Image Top=0)
     if settings['invert_z']: 
         final_z = map_size - final_z
 
-    # 3. SCALE & OFFSET
+    # Scale/Offset
     final_x = (final_x * settings['scale_factor']) + settings['off_x']
     final_z = (final_z * settings['scale_factor']) + settings['off_y']
     
     return final_x, final_z
 
 def reverse_transform(plot_x, plot_y, settings, map_size):
-    # Reverse Scale/Offset
     rx = (plot_x - settings['off_x']) / settings['scale_factor']
     rz = (plot_y - settings['off_y']) / settings['scale_factor']
     
-    # Reverse Inversion
     if settings['invert_z']: 
         rz = map_size - rz
         
@@ -146,20 +141,20 @@ def reverse_transform(plot_x, plot_y, settings, map_size):
     game_z = rx if settings['swap_xz'] else rz
     return game_x, game_z
 
-# --- 4. RENDER ENGINE (LOCKED ASPECT RATIO) ---
+# --- 4. RENDER ENGINE ---
 def render_map(df, map_name, settings, search_term, custom_markers, active_layers, poi_db):
     config = MAP_CONFIG[map_name]
     map_size = config["size"]
     fig = go.Figure()
 
-    # A. IMAGE LAYER (Background)
+    # A. IMAGE LAYER
     img = load_map_image(config["image"])
     if img:
         fig.add_layout_image(
             dict(
                 source=img,
                 xref="x", yref="y",
-                x=0, y=0,           # Locked to Top-Left
+                x=0, y=0,
                 sizex=map_size, sizey=map_size,
                 sizing="stretch",
                 opacity=1,
@@ -169,56 +164,68 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
     else:
         fig.add_shape(type="rect", x0=0, y0=0, x1=map_size, y1=map_size, line=dict(color="RoyalBlue"))
 
-    # B. GRID SYSTEM (Strict Overlay)
+    # B. STICKY GRID SYSTEM (The "Izurvive" Logic)
     if settings['show_grid']:
-        tick_vals = []
-        tick_text = []
+        # We will draw lines manually so they are attached to the MAP coordinates
+        grid_lines_x = []
+        grid_lines_y = []
         
-        # 00 to 15 Loop
+        # Grid Labels (Scatter Trace instead of Axis Ticks for perfect sync)
+        label_x_pos = []
+        label_x_text = []
+        label_y_pos = []
+        label_y_text = []
+
         for i in range(16):
-            # Calculate exact pixel position for grid line
-            raw_pos = i * 1000
+            # i = 0 to 15
+            # Line Position (Edge of grid)
+            line_pos = i * 1000
             
-            # X-Axis Ticks (Left to Right)
-            t_x = (raw_pos * settings['scale_factor']) + settings['off_x']
-            tick_vals.append(t_x)
-            tick_text.append(f"{i:02d}")
+            # Label Position (Center of grid)
+            center_pos = (i * 1000) + 500
             
-            # Draw Grid Lines Manually to force them "Above" image
-            # Vertical
-            fig.add_shape(type="line", x0=t_x, y0=0, x1=t_x, y1=map_size,
+            # Transform to Map Coords
+            t_line_x = (line_pos * settings['scale_factor']) + settings['off_x']
+            t_line_y = (line_pos * settings['scale_factor']) + settings['off_y']
+            
+            t_label_x = (center_pos * settings['scale_factor']) + settings['off_x']
+            t_label_y = (center_pos * settings['scale_factor']) + settings['off_y']
+
+            # ADD VERTICAL LINES
+            fig.add_shape(type="line", x0=t_line_x, y0=0, x1=t_line_x, y1=map_size,
                           line=dict(color="rgba(255, 255, 255, 0.2)", width=1), layer="above")
             
-            # Horizontal (Y-Axis)
-            # Since our Y-Axis is inverted (0 Top), the math is simple: 
-            # 00 is at 0px, 01 is at 1000px, etc.
-            t_y = (raw_pos * settings['scale_factor']) + settings['off_y']
-            
-            fig.add_shape(type="line", x0=0, y0=t_y, x1=map_size, y1=t_y,
+            # ADD HORIZONTAL LINES
+            fig.add_shape(type="line", x0=0, y0=t_line_y, x1=map_size, y1=t_line_y,
                           line=dict(color="rgba(255, 255, 255, 0.2)", width=1), layer="above")
 
-        # AXIS CONFIGURATION (LOCKED)
-        fig.update_xaxes(
-            visible=True, range=[0, map_size], side="top",
-            tickmode="array", tickvals=tick_vals, ticktext=tick_text,
-            tickfont=dict(size=14, color="white", family="Arial Black"),
-            showgrid=False, zeroline=False,
-            # CRITICAL: LOCK ASPECT RATIO
-            constrain='domain'
-        )
+            # PREPARE LABELS (TOP and LEFT)
+            # Top Labels (X Axis)
+            label_x_pos.append(t_label_x)
+            label_x_text.append(f"{i:02d}")
+            
+            # Left Labels (Y Axis) - 00 at Top
+            label_y_pos.append(t_label_y)
+            label_y_text.append(f"{i:02d}")
+
+        # DRAW LABELS AS SCATTER TRACE (This forces them to move with zoom/pan)
+        # Top Row
+        fig.add_trace(go.Scatter(
+            x=label_x_pos, 
+            y=[-400] * 16, # Slightly above the map (Negative Y in image space)
+            mode='text', text=label_x_text,
+            textfont=dict(size=14, color="white", family="Arial Black"),
+            hoverinfo='skip', showlegend=False
+        ))
         
-        fig.update_yaxes(
-            visible=True, range=[map_size, 0], # 0 at TOP (Standard Image Coords)
-            tickmode="array", tickvals=tick_vals, ticktext=tick_text,
-            tickfont=dict(size=14, color="white", family="Arial Black"),
-            showgrid=False, zeroline=False,
-            # CRITICAL: LOCK ASPECT RATIO to X Axis so map doesn't float/squash
-            scaleanchor="x", scaleratio=1,
-            constrain='domain'
-        )
-    else:
-        fig.update_xaxes(visible=False, range=[0, map_size], constrain='domain')
-        fig.update_yaxes(visible=False, range=[map_size, 0], scaleanchor="x", scaleratio=1, constrain='domain')
+        # Left Column
+        fig.add_trace(go.Scatter(
+            x=[-400] * 16, # Slightly left of the map
+            y=label_y_pos,
+            mode='text', text=label_y_text,
+            textfont=dict(size=14, color="white", family="Arial Black"),
+            hoverinfo='skip', showlegend=False
+        ))
 
     # C. TOWNS
     if settings['show_towns'] and map_name in TOWN_DATA:
@@ -287,14 +294,17 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
             name="Logs"
         ))
 
-    # G. LAYOUT (FIXED CONTAINER)
+    # G. LAYOUT
     fig.update_layout(
-        height=800, # Fixed height to prevent website jumping
-        margin={"l": 40, "r": 40, "t": 40, "b": 10},
+        height=850, # Generous vertical space
+        margin={"l": 20, "r": 20, "t": 20, "b": 20},
         plot_bgcolor="#0e1117", paper_bgcolor="#0e1117",
         dragmode="pan" if settings['click_mode'] == "Navigate" else False,
         showlegend=True,
-        legend=dict(yanchor="top", y=0.95, xanchor="right", x=0.99, bgcolor="rgba(0,0,0,0.6)", font=dict(color="white"))
+        legend=dict(yanchor="top", y=0.95, xanchor="right", x=0.99, bgcolor="rgba(0,0,0,0.6)", font=dict(color="white")),
+        # AXES VISIBLE BUT EMPTY (We drew our own labels)
+        xaxis=dict(visible=False, range=[-800, map_size + 500]), # Extra range for labels
+        yaxis=dict(visible=False, range=[map_size + 500, -800])  # Extra range for labels + INVERTED
     )
     return fig, map_size
 
@@ -306,9 +316,7 @@ def main():
     <style>
         .stApp { background-color: #0e1117; color: #fafafa; }
         [data-testid="stSidebar"] { background-color: #262730; }
-        [data-testid="stSidebar"] h1, [data-testid="stSidebar"] h2, [data-testid="stSidebar"] h3,
-        [data-testid="stSidebar"] label, [data-testid="stSidebar"] p, 
-        [data-testid="stFileUploader"] small, .streamlit-expanderHeader p { color: #cccccc !important; }
+        [data-testid="stSidebar"] * { color: #cccccc !important; }
         .block-container { padding-top: 1rem !important; }
     </style>
     """, unsafe_allow_html=True)
@@ -318,12 +326,12 @@ def main():
         selected_map = st.selectbox("Map", list(MAP_CONFIG.keys()))
         
         st.write("---")
-        uploaded_log = st.file_uploader("1. Upload Logs (.ADM/.RPT)", type=['adm', 'rpt', 'log'])
-        uploaded_csv = st.file_uploader("2. Upload POI Database (.CSV)", type=['csv'])
+        uploaded_log = st.file_uploader("1. Upload Logs", type=['adm', 'rpt', 'log'])
+        uploaded_csv = st.file_uploader("2. Upload POI DB", type=['csv'])
         
         if uploaded_csv:
             current_db = parse_poi_csv(uploaded_csv)
-            st.success("✅ Custom Database")
+            st.success("✅ DB Loaded")
         else:
             current_db = DEFAULT_POI_DATABASE
 
@@ -333,29 +341,28 @@ def main():
             valid_times = df.dropna(subset=['time_obj'])
             if not valid_times.empty:
                 st.markdown("---")
-                st.subheader("⏳ Time Filter")
+                st.subheader("⏳ Time")
                 min_t, max_t = valid_times['time_obj'].min(), valid_times['time_obj'].max()
                 if min_t != max_t:
                     start_time, end_time = st.slider("Window", value=(min_t, max_t), format="HH:mm:ss")
                     df = df[(df['time_obj'] >= start_time) & (df['time_obj'] <= end_time)]
 
         st.markdown("---")
-        st.subheader("👁️ Layers")
         available_layers = current_db.get(selected_map, {}).keys()
         active_layers = [layer for layer in available_layers if st.checkbox(layer, value=True)]
         
-        show_grid = st.checkbox("Show Grid (0-15)", value=True)
-        show_towns = st.checkbox("Show Town Names", value=True)
+        show_grid = st.checkbox("Grid (0-15)", value=True)
+        show_towns = st.checkbox("Town Names", value=True)
 
         st.markdown("---")
-        click_mode = st.radio("🖱️ Mouse Mode", ["Navigate", "🎯 Add Marker"], horizontal=True)
-        search_term = st.text_input("🔍 Search", placeholder="Player Name...")
+        click_mode = st.radio("Mode", ["Navigate", "🎯 Add Marker"], horizontal=True)
+        search_term = st.text_input("Search", placeholder="Player...")
         
-        with st.expander("⚙️ Calibration"):
+        with st.expander("Calibration"):
             settings = {
-                "use_y_as_z": st.checkbox("Fix Ocean Dots", True),
+                "use_y_as_z": st.checkbox("Fix Ocean", True),
                 "swap_xz": st.checkbox("Swap X/Z", False),
-                "invert_z": st.checkbox("Invert Vertical", True), # TRUE Default for Image Alignment
+                "invert_z": st.checkbox("Invert Vertical", True),
                 "off_x": st.slider("X Off", -2000, 2000, 0, 10),
                 "off_y": st.slider("Y Off", -2000, 2000, 0, 10),
                 "scale_factor": st.slider("Scale", 0.8, 1.2, 1.0, 0.005),
@@ -371,7 +378,6 @@ def main():
     
     fig, map_size = render_map(df, selected_map, settings, search_term, st.session_state['custom_markers'], active_layers, current_db)
 
-    # EVENT HANDLING
     event = st.plotly_chart(
         fig, on_select="rerun", selection_mode="points", use_container_width=True,
         config={'scrollZoom': True, 'displayModeBar': True, 'modeBarButtonsToAdd': ['zoomIn2d', 'zoomOut2d', 'resetScale2d', 'pan2d'], 'displaylogo': False}
@@ -379,7 +385,6 @@ def main():
 
     if click_mode == "🎯 Add Marker" and len(event.selection.points) > 0:
         p = event.selection.points[0]
-        # Robust check for missing x/y in event data
         if 'x' in p and 'y' in p:
             gx, gz = reverse_transform(p['x'], p['y'], settings, map_size)
             @st.dialog("Add Marker")
