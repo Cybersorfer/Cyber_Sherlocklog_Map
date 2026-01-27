@@ -59,7 +59,9 @@ def parse_log_file(uploaded_file):
     content = uploaded_file.getvalue().decode("utf-8", errors='ignore')
     lines = content.split('\n')
 
+    # Regex to find coordinates <X, Y, Z>
     coord_pattern = re.compile(r"<([0-9\.-]+),\s*([0-9\.-]+),\s*([0-9\.-]+)>")
+    # Regex to find Player Name
     name_pattern = re.compile(r'(?:Player|Identity)\s+"([^"]+)"')
 
     for line in lines:
@@ -69,21 +71,33 @@ def parse_log_file(uploaded_file):
             name_match = name_pattern.search(line)
             name = name_match.group(1) if name_match else "Unknown"
             
+            # Clean up the line to use as "Activity" description
+            clean_activity = line.strip()[:150] # Take first 150 chars
+            
             logs.append({
                 "name": name,
                 "raw_1": float(v1),
                 "raw_2": float(v2),
                 "raw_3": float(v3),
-                "details": line[:120]
+                "activity": clean_activity 
             })
             
     return pd.DataFrame(logs)
 
 # --- 3. MAP RENDERING ENGINE ---
-def render_map(df, map_name, swap_xz, invert_z, use_y_as_z, off_x, off_y, scale_factor, show_towns):
+def render_map(df, map_name, settings, search_term, custom_markers):
     config = MAP_CONFIG[map_name]
     map_size = config["size"]
     img_path = config["image"]
+    
+    # Unpack settings
+    swap_xz = settings['swap_xz']
+    invert_z = settings['invert_z']
+    use_y_as_z = settings['use_y_as_z']
+    off_x = settings['off_x']
+    off_y = settings['off_y']
+    scale_factor = settings['scale_factor']
+    show_towns = settings['show_towns']
 
     fig = go.Figure()
 
@@ -107,7 +121,7 @@ def render_map(df, map_name, swap_xz, invert_z, use_y_as_z, off_x, off_y, scale_
     except FileNotFoundError:
         st.warning(f"⚠️ Image not found: {img_path}")
 
-    # -- B. Helper Function for Coordinate Transformation --
+    # -- B. Helper: Coordinate Transformation --
     def transform_coords(raw_x, raw_z):
         final_x = raw_z if swap_xz else raw_x
         final_z = raw_x if swap_xz else raw_z
@@ -117,30 +131,71 @@ def render_map(df, map_name, swap_xz, invert_z, use_y_as_z, off_x, off_y, scale_
         final_z = (final_z * scale_factor) + off_y
         return final_x, final_z
 
-    # -- C. Plot Towns --
-    if show_towns and map_name in TOWN_DATA:
+    # -- C. Plot Towns (Toggleable) --
+    if map_name in TOWN_DATA:
         towns = TOWN_DATA[map_name]
         t_x, t_y, t_names = [], [], []
         
+        search_hits_x = []
+        search_hits_y = []
+
         for town in towns:
             tx, ty = transform_coords(town['x'], town['z'])
             t_x.append(tx)
             t_y.append(ty)
             t_names.append(town['name'])
+            
+            # SEARCH LOGIC: Check if town matches search term
+            if search_term and search_term.lower() in town['name'].lower():
+                search_hits_x.append(tx)
+                search_hits_y.append(ty)
 
+        if show_towns:
+            fig.add_trace(go.Scatter(
+                x=t_x,
+                y=t_y,
+                mode='markers+text',
+                text=t_names,
+                textposition="top center",
+                marker=dict(size=8, color='yellow', line=dict(width=1, color='black')),
+                textfont=dict(family="Arial Black", size=12, color="black"),
+                hoverinfo='none',
+                name="Towns" # Legend Item
+            ))
+            
+        # Plot Search Highlights (Big Green Circles)
+        if search_hits_x:
+            fig.add_trace(go.Scatter(
+                x=search_hits_x,
+                y=search_hits_y,
+                mode='markers',
+                marker=dict(size=25, color='rgba(0, 255, 0, 0.3)', line=dict(width=2, color='lime')),
+                name="Search Result",
+                hoverinfo='skip'
+            ))
+
+    # -- D. Plot Custom Markers --
+    if custom_markers:
+        c_x, c_y, c_names = [], [], []
+        for m in custom_markers:
+            cx, cy = transform_coords(m['x'], m['z'])
+            c_x.append(cx)
+            c_y.append(cy)
+            c_names.append(m['label'])
+            
         fig.add_trace(go.Scatter(
-            x=t_x,
-            y=t_y,
+            x=c_x,
+            y=c_y,
             mode='markers+text',
-            text=t_names,
-            textposition="top center",
-            marker=dict(size=8, color='yellow', line=dict(width=1, color='black')),
-            textfont=dict(family="Arial Black", size=12, color="black"),
-            hoverinfo='skip',
-            name="Locations"
+            text=c_names,
+            textposition="bottom center",
+            marker=dict(size=12, symbol="star", color='cyan', line=dict(width=1, color='blue')),
+            textfont=dict(color='cyan', size=11),
+            name="Custom Markers",
+            hovertemplate="<b>%{text}</b><extra></extra>"
         ))
 
-    # -- D. Plot Log Data --
+    # -- E. Plot Log Data (Players) --
     if not df.empty:
         raw_x_col = df["raw_1"]
         raw_z_col = df["raw_2"] if use_y_as_z else df["raw_3"]
@@ -153,41 +208,55 @@ def render_map(df, map_name, swap_xz, invert_z, use_y_as_z, off_x, off_y, scale_
             
         final_x = (final_x * scale_factor) + off_x
         final_z = (final_z * scale_factor) + off_y
-
+        
+        # Prepare detailed hover text
+        # storing activity in customdata to use in hovertemplate
+        
         fig.add_trace(
             go.Scatter(
                 x=final_x,
                 y=final_z,
                 mode='markers',
-                marker=dict(size=8, color='red', line=dict(width=1, color='white')),
+                marker=dict(size=7, color='red', line=dict(width=1, color='white')),
                 text=df["name"],
-                hovertemplate="<b>%{text}</b><br>X: %{x:.0f}, Z: %{y:.0f}<extra></extra>",
-                name="Logs"
+                customdata=df["activity"], # Passing full activity text
+                # HOVER TEMPLATE: Shows Name, Coords, AND Activity
+                hovertemplate="<b>%{text}</b><br>X: %{x:.0f}, Z: %{y:.0f}<br><i>%{customdata}</i><extra></extra>",
+                name="Players"
             )
         )
 
-    # -- E. Lock Axes & Dark Theme --
-    fig.update_xaxes(range=[0, map_size], visible=False, showgrid=False)
-    fig.update_yaxes(range=[0, map_size], visible=False, showgrid=False)
+    # -- F. Lock Axes & Layout --
+    fig.update_xaxes(range=[0, map_size], visible=False, showgrid=False, fixedrange=False)
+    fig.update_yaxes(range=[0, map_size], visible=False, showgrid=False, fixedrange=False)
 
     fig.update_layout(
         width=900,
-        height=900,
+        height=850,
         margin={"l": 0, "r": 0, "t": 0, "b": 0},
-        plot_bgcolor="#0e1117",  # Plot area background
-        paper_bgcolor="#0e1117", # Whole figure background (Removes white border)
-        dragmode="pan",
-        showlegend=False
+        plot_bgcolor="#0e1117",  
+        paper_bgcolor="#0e1117", 
+        dragmode="pan",          # Default to panning
+        showlegend=True,         # SHOW LEGEND so user can toggle layers
+        legend=dict(
+            yanchor="top",
+            y=0.99,
+            xanchor="right",
+            x=0.99,
+            bgcolor="rgba(0,0,0,0.5)",
+            font=dict(color="white")
+        )
     )
 
-    # -- F. Render with Scroll Zoom Enabled --
+    # -- G. Render --
     st.plotly_chart(
         fig, 
         use_container_width=True, 
         config={
-            'scrollZoom': True,       # Enables Mouse Wheel Zoom
-            'displayModeBar': False,  # Hides the floating toolbar for cleaner look
-            'staticPlot': False
+            'scrollZoom': True,       # ENABLE MOUSE ZOOM
+            'displayModeBar': True,   # SHOW TOOLS
+            'displaylogo': False,
+            'modeBarButtonsToRemove': ['select2d', 'lasso2d', 'autoScale2d'] # Clean up tools
         }
     )
 
@@ -195,105 +264,79 @@ def render_map(df, map_name, swap_xz, invert_z, use_y_as_z, off_x, off_y, scale_
 def main():
     st.set_page_config(layout="wide", page_title="DayZ Log Mapper")
 
-    # --- ENHANCED DARK THEME CSS ---
+    # Initialize Session State for Custom Markers
+    if 'custom_markers' not in st.session_state:
+        st.session_state['custom_markers'] = []
+
+    # CSS Styling
     st.markdown("""
     <style>
-        /* Main Background */
-        .stApp {
-            background-color: #0e1117;
-            color: #fafafa;
-        }
-        
-        /* Remove Top White Gap (Streamlit Padding) */
-        .block-container {
-            padding-top: 2rem !important; 
-            padding-bottom: 0rem !important;
-        }
-
-        /* Sidebar Background */
-        [data-testid="stSidebar"] {
-            background-color: #262730;
-            color: #fafafa;
-        }
-        
-        /* Button Styling */
-        .stButton>button {
-            color: #ffffff;
-            background-color: #4CAF50;
-            border: none;
-        }
-        .stButton>button:hover {
-            color: #ffffff;
-            background-color: #45a049;
-        }
-        
-        /* Widgets Text Color */
-        .stSelectbox label, .stCheckbox label, .stSlider label {
-            color: #fafafa !important;
-        }
-        
-        /* FILE UPLOADER DARK THEME */
-        [data-testid="stFileUploader"] {
-            background-color: #262730; 
-            border-radius: 5px;
-            padding: 10px;
-        }
-        [data-testid="stFileUploader"] section {
-            background-color: #363940 !important;
-        }
-        [data-testid="stFileUploader"] div, [data-testid="stFileUploader"] span, [data-testid="stFileUploader"] small {
-            color: #fafafa !important;
-        }
-        
-        /* Input Box Styling */
-        div[data-baseweb="select"] > div {
-            background-color: #404040 !important;
-            color: white !important;
-        }
+        .stApp { background-color: #0e1117; color: #fafafa; }
+        .block-container { padding-top: 1rem !important; padding-bottom: 0rem !important; }
+        [data-testid="stSidebar"] { background-color: #262730; color: #fafafa; }
+        .stButton>button { color: #ffffff; background-color: #4CAF50; border: none; }
+        div[data-baseweb="select"] > div { background-color: #404040 !important; color: white !important; }
     </style>
     """, unsafe_allow_html=True)
     
     with st.sidebar:
-        st.title("🗺️ Settings")
+        st.title("🗺️ Control Panel")
         
-        if st.button("🔄 Refresh Map"):
-            st.rerun()
+        selected_map = st.selectbox("Select Map", list(MAP_CONFIG.keys()))
+        uploaded_file = st.file_uploader("📂 Upload .ADM / .RPT / .LOG", type=['adm', 'rpt', 'log', 'txt'])
+        
+        st.markdown("---")
+        st.subheader("🔍 Search")
+        search_term = st.text_input("Find Town or Player", placeholder="e.g. Novy or Survivor")
+        
+        st.markdown("---")
+        with st.expander("📍 Custom Markers (Add Tools)"):
+            c_name = st.text_input("Label", "Base")
+            c_x = st.number_input("X Coord", value=0)
+            c_z = st.number_input("Z Coord", value=0)
+            if st.button("Add Marker"):
+                st.session_state['custom_markers'].append({"label": c_name, "x": c_x, "z": c_z})
+                st.success(f"Added {c_name}")
             
-        st.markdown("---")
-        
-        selected_map = st.selectbox("Map", list(MAP_CONFIG.keys()))
-        uploaded_file = st.file_uploader("Upload Log", type=['adm', 'rpt', 'log', 'txt'])
-        
-        st.markdown("---")
-        st.header("🔧 Calibrator")
-        
-        use_y_as_z = st.checkbox("Fix: Dots in Ocean? (Use 2nd num as North)", value=True)
-        swap_xz = st.checkbox("Swap X/Z Axis", value=False)
-        invert_z = st.checkbox("Invert Vertical (Flip N/S)", value=False)
-        
-        st.markdown("---")
-        st.subheader("🎯 Fine-Tune Alignment")
-        
-        off_x = st.slider("X Offset (Left/Right)", -2000, 2000, -20, step=10)
-        off_y = st.slider("Y Offset (Up/Down)", -2000, 2000, -20, step=10)
-        scale_factor = st.slider("Scale Factor (Zoom)", 0.8, 1.2, 1.0, step=0.005)
-        
-        st.markdown("---")
-        st.subheader("👁️ View Options")
-        show_towns = st.checkbox("Show Town Names", value=True)
+            if st.button("Clear All Custom Markers"):
+                st.session_state['custom_markers'] = []
+                st.rerun()
 
-    st.title(f"Server Map: {selected_map}")
+        st.markdown("---")
+        with st.expander("⚙️ Calibration & Settings"):
+            use_y_as_z = st.checkbox("Fix: Dots in Ocean?", value=True)
+            swap_xz = st.checkbox("Swap X/Z Axis", value=False)
+            invert_z = st.checkbox("Invert Vertical", value=False)
+            off_x = st.slider("X Offset", -2000, 2000, -20, step=10)
+            off_y = st.slider("Y Offset", -2000, 2000, -20, step=10)
+            scale_factor = st.slider("Zoom Scale", 0.8, 1.2, 1.0, step=0.005)
+            show_towns = st.checkbox("Show Town Names", value=True)
+            
+            settings = {
+                "use_y_as_z": use_y_as_z, "swap_xz": swap_xz, "invert_z": invert_z,
+                "off_x": off_x, "off_y": off_y, "scale_factor": scale_factor,
+                "show_towns": show_towns
+            }
 
+    # Main Area
     if uploaded_file:
         df = parse_log_file(uploaded_file)
         if not df.empty:
-            st.success(f"Loaded {len(df)} points.")
-            render_map(df, selected_map, swap_xz, invert_z, use_y_as_z, off_x, off_y, scale_factor, show_towns)
+            st.success(f"Loaded {len(df)} activities.")
+            
+            # Filter DataFrame if Searching for Player
+            if search_term:
+                 # Case insensitive search in Name
+                 matches = df[df['name'].str.contains(search_term, case=False, na=False)]
+                 if not matches.empty:
+                     st.info(f"Found {len(matches)} logs for '{search_term}'")
+                     # We still pass full DF to see context, but you could pass 'matches' to isolate
         else:
-            st.error("No coordinates found.")
+            st.error("No coordinates found in file.")
     else:
-        render_map(pd.DataFrame(), selected_map, swap_xz, invert_z, use_y_as_z, off_x, off_y, scale_factor, show_towns)
-        st.info("Upload a log file to start.")
+        df = pd.DataFrame()
+
+    render_map(df, selected_map, settings, search_term, st.session_state['custom_markers'])
 
 if __name__ == "__main__":
     main()
