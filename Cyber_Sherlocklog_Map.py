@@ -124,7 +124,7 @@ def transform_coords(raw_x, raw_z, settings, map_size):
     if settings['invert_z']: 
         final_z = map_size - final_z
 
-    # Scale/Offset
+    # Scale/Offset (Applied to COORDINATES)
     final_x = (final_x * settings['scale_factor']) + settings['off_x']
     final_z = (final_z * settings['scale_factor']) + settings['off_y']
     
@@ -147,24 +147,27 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
     map_size = config["size"]
     fig = go.Figure()
 
-    # A. IMAGE LAYER
+    # A. IMAGE LAYER (Raster Adjustment)
     img = load_map_image(config["image"])
     if img:
         fig.add_layout_image(
             dict(
                 source=img,
                 xref="x", yref="y",
-                x=0, y=0,
-                sizex=map_size, sizey=map_size,
+                # Apply Image Calibration Settings
+                x=settings['img_off_x'], 
+                y=settings['img_off_y'],
+                sizex=map_size * settings['img_scale'], 
+                sizey=map_size * settings['img_scale'],
                 sizing="stretch",
-                opacity=1,
+                opacity=settings['img_opacity'],
                 layer="below"
             )
         )
     else:
         fig.add_shape(type="rect", x0=0, y0=0, x1=map_size, y1=map_size, line=dict(color="RoyalBlue"))
 
-    # B. STICKY GRID SYSTEM (The "Izurvive" Logic)
+    # B. STICKY GRID SYSTEM (Vector Adjustment)
     if settings['show_grid']:
         # We will draw lines manually so they are attached to the MAP coordinates
         grid_lines_x = []
@@ -184,19 +187,26 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
             # Label Position (Center of grid)
             center_pos = (i * 1000) + 500
             
-            # Transform to Map Coords
+            # Transform to Map Coords (Applied to COORDINATES)
             t_line_x = (line_pos * settings['scale_factor']) + settings['off_x']
             t_line_y = (line_pos * settings['scale_factor']) + settings['off_y']
             
             t_label_x = (center_pos * settings['scale_factor']) + settings['off_x']
             t_label_y = (center_pos * settings['scale_factor']) + settings['off_y']
+            
+            # Since grid is 0-15k, we need the "max" line too for the border
+            t_max_size = (map_size * settings['scale_factor'])
 
             # ADD VERTICAL LINES
-            fig.add_shape(type="line", x0=t_line_x, y0=0, x1=t_line_x, y1=map_size,
+            fig.add_shape(type="line", 
+                          x0=t_line_x, y0=settings['off_y'], # Start at coord offset Y
+                          x1=t_line_x, y1=t_max_size + settings['off_y'], # End at scaled max Y
                           line=dict(color="rgba(255, 255, 255, 0.2)", width=1), layer="above")
             
             # ADD HORIZONTAL LINES
-            fig.add_shape(type="line", x0=0, y0=t_line_y, x1=map_size, y1=t_line_y,
+            fig.add_shape(type="line", 
+                          x0=settings['off_x'], y0=t_line_y, # Start at coord offset X
+                          x1=t_max_size + settings['off_x'], y1=t_line_y, # End at scaled max X
                           line=dict(color="rgba(255, 255, 255, 0.2)", width=1), layer="above")
 
             # PREPARE LABELS (TOP and LEFT)
@@ -208,11 +218,14 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
             label_y_pos.append(t_label_y)
             label_y_text.append(f"{i:02d}")
 
-        # DRAW LABELS AS SCATTER TRACE (This forces them to move with zoom/pan)
+        # DRAW LABELS AS SCATTER TRACE
+        # Calculate label offset (slightly outside the map area)
+        label_offset = -400 * settings['scale_factor']
+        
         # Top Row
         fig.add_trace(go.Scatter(
             x=label_x_pos, 
-            y=[-400] * 16, # Slightly above the map (Negative Y in image space)
+            y=[label_offset + settings['off_y']] * 16, 
             mode='text', text=label_x_text,
             textfont=dict(size=14, color="white", family="Arial Black"),
             hoverinfo='skip', showlegend=False
@@ -220,7 +233,7 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
         
         # Left Column
         fig.add_trace(go.Scatter(
-            x=[-400] * 16, # Slightly left of the map
+            x=[label_offset + settings['off_x']] * 16, 
             y=label_y_pos,
             mode='text', text=label_y_text,
             textfont=dict(size=14, color="white", family="Arial Black"),
@@ -303,8 +316,8 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
         showlegend=True,
         legend=dict(yanchor="top", y=0.95, xanchor="right", x=0.99, bgcolor="rgba(0,0,0,0.6)", font=dict(color="white")),
         # AXES VISIBLE BUT EMPTY (We drew our own labels)
-        xaxis=dict(visible=False, range=[-800, map_size + 500]), # Extra range for labels
-        yaxis=dict(visible=False, range=[map_size + 500, -800])  # Extra range for labels + INVERTED
+        xaxis=dict(visible=False, range=[-2000, map_size + 2000]), 
+        yaxis=dict(visible=False, range=[map_size + 2000, -2000])  # Inverted Y
     )
     return fig, map_size
 
@@ -358,16 +371,35 @@ def main():
         click_mode = st.radio("Mode", ["Navigate", "🎯 Add Marker"], horizontal=True)
         search_term = st.text_input("Search", placeholder="Player...")
         
-        with st.expander("Calibration"):
-            settings = {
-                "use_y_as_z": st.checkbox("Fix Ocean", True),
-                "swap_xz": st.checkbox("Swap X/Z", False),
-                "invert_z": st.checkbox("Invert Vertical", True),
-                "off_x": st.slider("X Off", -2000, 2000, 0, 10),
-                "off_y": st.slider("Y Off", -2000, 2000, 0, 10),
-                "scale_factor": st.slider("Scale", 0.8, 1.2, 1.0, 0.005),
-                "click_mode": click_mode, "show_grid": show_grid, "show_towns": show_towns
+        st.write("---")
+        st.subheader("🔧 Calibration")
+        
+        # 1. Map Image Calibration (Moves the background)
+        with st.expander("🖼️ Map Image Calibration"):
+            st.caption("Adjust the background image position/size.")
+            img_settings = {
+                "img_off_x": st.slider("Image X Offset", -4000, 4000, 0, 10, key="img_x", help="Moves the background image Left/Right"),
+                "img_off_y": st.slider("Image Y Offset", -4000, 4000, 0, 10, key="img_y", help="Moves the background image Up/Down"),
+                "img_scale": st.slider("Image Scale", 0.5, 1.5, 1.0, 0.005, key="img_s", help="Zooms the background image in/out"),
+                "img_opacity": st.slider("Opacity", 0.1, 1.0, 1.0, 0.1, key="img_o")
             }
+
+        # 2. Coordinate Calibration (Moves the markers/grid)
+        with st.expander("📍 Coordinate Calibration"):
+            st.caption("Adjust the markers, grid, and logs.")
+            coord_settings = {
+                "use_y_as_z": st.checkbox("Fix Ocean (Use Y as Z)", True),
+                "swap_xz": st.checkbox("Swap X/Z", False),
+                "invert_z": st.checkbox("Invert Vertical (Z)", True),
+                "off_x": st.slider("Coord X Offset", -4000, 4000, 0, 10, key="c_x", help="Moves the Grid/Markers Left/Right"),
+                "off_y": st.slider("Coord Y Offset", -4000, 4000, 0, 10, key="c_y", help="Moves the Grid/Markers Up/Down"),
+                "scale_factor": st.slider("Coord Scale", 0.5, 1.5, 1.0, 0.005, key="c_s", help="Scales the distance between markers"),
+                "click_mode": click_mode, 
+                "show_grid": show_grid, 
+                "show_towns": show_towns
+            }
+            
+        settings = {**img_settings, **coord_settings}
             
         if st.session_state['custom_markers'] and st.button("Clear Markers"):
             st.session_state['custom_markers'] = []
