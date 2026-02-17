@@ -5,10 +5,11 @@ import pandas as pd
 from PIL import Image
 from datetime import datetime
 
-# --- 1. CONFIGURATION & LOCKED CALIBRATION ---
+# --- 1. CONFIGURATION ---
 st.set_page_config(layout="wide", page_title="DayZ Intel Mapper")
 
-# 🔒 HARDCODED "WINNING" SETTINGS
+# 🔒 HARDCODED WINNING SETTINGS (The Source of Truth)
+# These are your specific calibration numbers. They cannot change.
 LOCKED_SETTINGS = {
     "img_off_x": 127,
     "img_off_y": 628,
@@ -16,10 +17,9 @@ LOCKED_SETTINGS = {
     "img_opacity": 1.0,
     "log_off_x": 150,
     "log_off_y": 40,
-    "log_format": "Format: <X, Y, Z>",
+    "log_format": "Format: <X, Y, Z>", # Correct for your server
     "swap_xy": False,
-    "show_grid": True,
-    "show_towns": True
+    "show_grid": True
 }
 
 MAP_CONFIG = {
@@ -28,9 +28,21 @@ MAP_CONFIG = {
     "Sakhal": {"size": 8192, "image": "map_sakhal.png"}
 }
 
-# --- DATABASE (Updated with User Coordinates) ---
+# --- DATABASE (Your Custom Locations) ---
 TOWN_DATA = {
     "Chernarus": [
+        # New User Entries
+        {"name": "Vybor", "x": 3916, "y": 8889},
+        {"name": "Verbnik", "x": 4416, "y": 9100},
+        {"name": "Dubnik", "x": 3300, "y": 10333},
+        {"name": "Lopatino", "x": 2796, "y": 10026},
+        {"name": "Vavilovo", "x": 2335, "y": 11097},
+        {"name": "Kalinka", "x": 2335, "y": 11097},
+        {"name": "Bashnya", "x": 2335, "y": 11097},
+        {"name": "Adamovka", "x": 5340, "y": 11380},
+        {"name": "Bogat", "x": 7056, "y": 12021},
+        
+        # Standard List
         {"name": "Chernogorsk", "x": 6600, "y": 2500},
         {"name": "Elektrozavodsk", "x": 10200, "y": 2300},
         {"name": "Berezino", "x": 12300, "y": 9500},
@@ -50,15 +62,6 @@ TOWN_DATA = {
         {"name": "Gorka", "x": 9500, "y": 8800},
         {"name": "Novy Sobor", "x": 7100, "y": 7700},
         {"name": "Stary Sobor", "x": 6000, "y": 7700},
-        {"name": "Vybor", "x": 3916, "y": 8889}, 
-        {"name": "Verbnik", "x": 4416, "y": 9100},
-        {"name": "Dubnik", "x": 3300, "y": 10333},
-        {"name": "Lopatino", "x": 2796, "y": 10026}, 
-        {"name": "Vavilovo", "x": 2335, "y": 11097},
-        {"name": "Kalinka", "x": 2335, "y": 11097},
-        {"name": "Bashnya", "x": 2335, "y": 11097},
-        {"name": "Adamovka", "x": 5340, "y": 11380},
-        {"name": "Bogat", "x": 7056, "y": 12021},
         {"name": "Kabanino", "x": 5300, "y": 8600},
         {"name": "Grishino", "x": 5900, "y": 10300},
         {"name": "Krasnostav", "x": 11100, "y": 12300},
@@ -104,11 +107,11 @@ DEFAULT_POI_DATABASE = {
     "Chernarus": {
         "🛡️ Military": [
             {"name": "NWAF", "x": 4600, "y": 10400},
-            {"name": "Tisy Military Base", "x": 1600, "y": 14000},
-            {"name": "Troitskoe Military", "x": 7200, "y": 14600},
-            {"name": "Kamensk Military", "x": 7800, "y": 12800},
+            {"name": "Tisy Base", "x": 1600, "y": 14000},
+            {"name": "Troitskoe", "x": 7200, "y": 14600},
+            {"name": "Kamensk", "x": 7800, "y": 12800},
             {"name": "Myshkino Tents", "x": 1000, "y": 7500},
-            {"name": "MB VMC", "x": 4497, "y": 8284}, 
+            {"name": "MB VMC", "x": 4497, "y": 8284}
         ],
         "🏰 Landmarks": [
             {"name": "Green Mountain", "x": 3700, "y": 5900},
@@ -146,32 +149,27 @@ def parse_log_file_content(content_bytes):
             dt_match = datetime_pattern.search(line)
             t_match = time_pattern.search(line)
             
+            time_str = "Unknown"
+            log_time = None
+            
             if dt_match:
                 time_str = dt_match.group(1)
                 try: log_time = datetime.strptime(time_str, "%Y-%m-%d %H:%M:%S")
-                except: log_time = None
+                except: pass
             elif t_match:
                 time_str = t_match.group(1)
                 try: log_time = datetime.strptime(time_str, "%H:%M:%S")
-                except: log_time = None
-            else:
-                time_str = "Unknown Time"
-                log_time = None
+                except: pass
 
             name = name_match.group(1) if name_match else "Unknown"
-            
             content_lower = line.lower()
             is_hit = any(x in content_lower for x in ['hit', 'damage', 'shot', 'killed', 'unconscious'])
             icon = "💥" if is_hit else "👤"
             
             logs.append({
-                "time_obj": log_time,
-                "time_str": time_str,
-                "name": name,
-                "icon": icon,
-                "raw_1": float(v1),
-                "raw_2": float(v2),
-                "raw_3": float(v3)
+                "time_obj": log_time, "time_str": time_str,
+                "name": name, "icon": icon,
+                "raw_1": float(v1), "raw_2": float(v2), "raw_3": float(v3)
             })
     return pd.DataFrame(logs)
 
@@ -190,28 +188,21 @@ def parse_poi_csv(uploaded_csv):
     except Exception:
         return DEFAULT_POI_DATABASE
 
-# --- 3. COORDINATE MATH ---
-def transform_coords(game_x, game_y, settings):
-    return game_x, game_y
-
-# --- 4. RENDER ENGINE ---
-def render_map(df, map_name, settings, search_term, active_layers, poi_db):
+# --- 3. RENDER ENGINE ---
+def render_map(df, map_name, settings, search_term, show_towns, active_layers, poi_db):
     config = MAP_CONFIG[map_name]
     map_size = config["size"]
     fig = go.Figure()
 
-    # A. IMAGE LAYER
+    # A. MAP IMAGE
     img = load_map_image(config["image"])
     if img:
         img_width = map_size * settings['img_scale']
         img_height = map_size * settings['img_scale']
-        img_x = settings['img_off_x']
-        img_y = map_size + settings['img_off_y'] 
-        
         fig.add_layout_image(
             dict(
                 source=img, xref="x", yref="y",
-                x=img_x, y=img_y,
+                x=settings['img_off_x'], y=map_size + settings['img_off_y'],
                 sizex=img_width, sizey=img_height,
                 sizing="stretch", opacity=settings['img_opacity'],
                 layer="below"
@@ -220,27 +211,22 @@ def render_map(df, map_name, settings, search_term, active_layers, poi_db):
     else:
         fig.add_shape(type="rect", x0=0, y0=0, x1=map_size, y1=map_size, line=dict(color="RoyalBlue"))
 
-    # B. PHYSICAL GRID (Using ScatterGL for Speed)
+    # B. GRID LINES (ScatterGL)
     if settings['show_grid']:
         grid_x, grid_y = [], []
         for i in range(16): 
             pos = i * 1000
-            grid_x.extend([pos, pos, None]) 
-            grid_y.extend([0, map_size, None])
-        for i in range(16): 
-            pos = i * 1000
-            grid_x.extend([0, map_size, None]) 
-            grid_y.extend([pos, pos, None])
-
-        # OPTIMIZATION: Scattergl renders thousands of lines faster
+            grid_x.extend([pos, pos, None]); grid_y.extend([0, map_size, None])
+            grid_x.extend([0, map_size, None]); grid_y.extend([pos, pos, None])
+        
         fig.add_trace(go.Scattergl(
             x=grid_x, y=grid_y, mode='lines',
             line=dict(color='rgba(255, 255, 255, 0.2)', width=1),
             hoverinfo='skip', name='Grid'
         ))
 
-    # C. TOWNS & POIS (Using ScatterGL)
-    if settings['show_towns'] and map_name in TOWN_DATA:
+    # C. TOWNS (Always checked in main, passed here)
+    if show_towns and map_name in TOWN_DATA:
         t_x, t_y, t_names = [], [], []
         for town in TOWN_DATA[map_name]:
             t_x.append(town['x'])
@@ -251,10 +237,11 @@ def render_map(df, map_name, settings, search_term, active_layers, poi_db):
             x=t_x, y=t_y, mode='markers+text', text=t_names, textposition="top center",
             marker=dict(size=6, color='yellow', line=dict(width=1, color='black')),
             textfont=dict(family="Arial Black", size=14, color="black"), 
-            hovertemplate="<b>%{text}</b><br>Game: %{x:.0f} / %{y:.0f}<extra></extra>",
+            hovertemplate="<b>%{text}</b><br>%{x:.0f} / %{y:.0f}<extra></extra>",
             name="Towns"
         ))
 
+    # D. POI LAYERS (Military, etc)
     if map_name in poi_db:
         for layer_name, locations in poi_db[map_name].items():
             if layer_name in active_layers:
@@ -266,20 +253,22 @@ def render_map(df, map_name, settings, search_term, active_layers, poi_db):
                 
                 color = "cyan"
                 if "Military" in layer_name: color = "red"
-                elif "Castle" in layer_name: color = "purple"
+                elif "Landmarks" in layer_name: color = "purple"
                 
                 fig.add_trace(go.Scattergl(
                     x=l_x, y=l_y, mode='markers',
                     marker=dict(size=9, color=color, symbol='diamond', line=dict(width=1, color='black')),
                     text=l_txt, name=layer_name, 
-                    hovertemplate="<b>%{text}</b><br>Game: %{x:.0f} / %{y:.0f}<extra></extra>"
+                    hovertemplate="<b>%{text}</b><br>%{x:.0f} / %{y:.0f}<extra></extra>"
                 ))
 
-    # D. PLAYERS (LOGS) - Using ScatterGL for High Performance
+    # E. PLAYERS
     if not df.empty:
+        # Data Logic: Log Format <X, Y, Z> means use col 1 and 2
         raw_x = df["raw_1"]
         raw_y = df["raw_2"] 
         
+        # Apply Locked Offset
         fx = raw_x + settings['log_off_x']
         fy = raw_y + settings['log_off_y']
         
@@ -287,16 +276,13 @@ def render_map(df, map_name, settings, search_term, active_layers, poi_db):
             df['filtered'] = df['name'].str.contains(search_term, case=False, na=False)
             df_plot = df[df['filtered']].copy()
             if not df_plot.empty:
-                p_x = df_plot["raw_1"]
-                p_y = df_plot["raw_2"]
-                p_fx = p_x + settings['log_off_x']
-                p_fy = p_y + settings['log_off_y']
-                
+                p_x = df_plot["raw_1"] + settings['log_off_x']
+                p_y = df_plot["raw_2"] + settings['log_off_y']
                 adm_x = df_plot["raw_1"]
-                adm_y = p_y
+                adm_y = df_plot["raw_2"]
                 
                 fig.add_trace(go.Scattergl(
-                    x=p_fx, y=p_fy, mode='text',
+                    x=p_x, y=p_y, mode='text',
                     text=df_plot["icon"],
                     textfont=dict(size=14),
                     customdata=list(zip(df_plot["time_str"], df_plot["name"], adm_x, adm_y)),
@@ -313,39 +299,17 @@ def render_map(df, map_name, settings, search_term, active_layers, poi_db):
                 name="Logs"
             ))
 
-    # E. RULERS
-    grid_vals_x, grid_text_x = [], []
-    for i in range(16): 
-        grid_vals_x.append(i * 1000); grid_text_x.append(f"{i:02d}")
-    grid_vals_y, grid_text_y = [], []
-    for i in range(16): 
-        grid_vals_y.append(i * 1000); grid_text_y.append(f"{15-i:02d}")
-
     # F. LAYOUT (Optimized)
     fig.update_layout(
         height=900,
-        margin={"l": 40, "r": 40, "t": 80, "b": 40}, 
+        margin={"l": 20, "r": 20, "t": 60, "b": 20}, # Optimized Margins
         plot_bgcolor="#0e1117", paper_bgcolor="#0e1117",
-        dragmode="pan", 
-        hovermode="closest", showlegend=True,
+        dragmode="pan", hovermode="closest", showlegend=True,
         legend=dict(yanchor="bottom", y=0.01, xanchor="left", x=0.01, bgcolor="rgba(0,0,0,0.6)", font=dict(color="white")),
-        
-        xaxis=dict(
-            visible=True, range=[0, map_size], side="top",
-            showgrid=False, gridcolor="rgba(0,0,0,0)", 
-            tickmode="array", tickvals=grid_vals_x, ticktext=grid_text_x,
-            tickfont=dict(color="white", size=14, family="Arial Black"), zeroline=False
-        ),
-
-        yaxis=dict(
-            visible=True, range=[0, map_size], side="left",
-            showgrid=False, gridcolor="rgba(0,0,0,0)",
-            tickmode="array", tickvals=grid_vals_y, ticktext=grid_text_y,
-            tickfont=dict(color="white", size=14, family="Arial Black"),
-            scaleanchor="x", scaleratio=1, zeroline=False
-        )
+        xaxis=dict(visible=True, range=[0, map_size], side="top", showgrid=False, zeroline=False, tickfont=dict(color="white", size=14)),
+        yaxis=dict(visible=True, range=[0, map_size], side="left", showgrid=False, zeroline=False, tickfont=dict(color="white", size=14), scaleanchor="x", scaleratio=1)
     )
-    return fig, map_size
+    return fig
 
 # --- 5. UI MAIN ---
 def main():
@@ -353,10 +317,8 @@ def main():
     <style>
         .stApp { background-color: #0e1117; color: #fafafa; }
         [data-testid="stSidebar"] { background-color: #262730; }
-        header[data-testid="stHeader"] { display: none !important; }
-        #MainMenu { display: none !important; }
+        header { display: none !important; }
         footer { display: none !important; }
-        [data-testid="stDecoration"] { display: none !important; }
         .block-container { padding-top: 1rem !important; padding-bottom: 0rem !important; }
     </style>
     """, unsafe_allow_html=True)
@@ -366,7 +328,7 @@ def main():
         selected_map = st.selectbox("Map", list(MAP_CONFIG.keys()))
         st.write("---")
         uploaded_log = st.file_uploader("1. Upload Logs", type=['adm', 'rpt', 'log'])
-        st.caption("ℹ️ **Upload POI DB**: Optional CSV for permanent bases/traders.")
+        st.caption("ℹ️ **Upload POI DB**: Optional CSV.")
         uploaded_csv = st.file_uploader("2. Upload POI DB", type=['csv'])
         
         if uploaded_csv:
@@ -384,25 +346,31 @@ def main():
                 st.subheader("⏳ Time")
                 min_t, max_t = valid_times['time_obj'].min(), valid_times['time_obj'].max()
                 if min_t != max_t:
-                    try:
-                        # Use a Form to prevent slider lag
-                        with st.form("time_form"):
-                            start_time, end_time = st.slider("Window", value=(min_t, max_t), format="MM-DD HH:mm")
-                            if st.form_submit_button("Update Time"):
-                                df = df[(df['time_obj'] >= start_time) & (df['time_obj'] <= end_time)]
-                    except: pass
+                    with st.form("time_form"):
+                        start_time, end_time = st.slider("Window", value=(min_t, max_t), format="MM-DD HH:mm")
+                        if st.form_submit_button("Update Time"):
+                            df = df[(df['time_obj'] >= start_time) & (df['time_obj'] <= end_time)]
 
         st.markdown("---")
+        st.subheader("Layer Control")
+        
+        # Explicitly control layers so they don't disappear
+        show_towns = st.checkbox("Show Towns", value=True)
+        
         available_layers = current_db.get(selected_map, {}).keys()
-        active_layers = [layer for layer in available_layers if st.checkbox(layer, value=True)]
+        active_layers = []
+        for layer in available_layers:
+            if st.checkbox(layer, value=True):
+                active_layers.append(layer)
         
         search_term = st.text_input("Search", placeholder="Player...")
         
-    col1, col2 = st.columns([0.98, 0.02])
+    col1, col2 = st.columns([0.99, 0.01])
     with col1: 
         st.subheader(f"📍 {selected_map}")
     
-    fig, map_size = render_map(df, selected_map, LOCKED_SETTINGS, search_term, active_layers, current_db)
+    # RENDER (LOCKED SETTINGS)
+    fig = render_map(df, selected_map, LOCKED_SETTINGS, search_term, show_towns, active_layers, current_db)
 
     st.plotly_chart(
         fig, 
