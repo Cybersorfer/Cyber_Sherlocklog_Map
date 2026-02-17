@@ -8,17 +8,17 @@ from datetime import datetime
 # --- 1. CONFIGURATION & SAVED CALIBRATION ---
 st.set_page_config(layout="wide", page_title="DayZ Intel Mapper")
 
-# ⚠️ YOUR WINNING NUMBERS (Forced Load)
+# ⚠️ UPDATED WINNING NUMBERS (Map Pulled UP)
 DEFAULT_CALIBRATION = {
-    "img_off_x": -100,  
-    "img_off_y": -300,  
+    "img_off_x": -50,   # Adjusted slightly Right
+    "img_off_y": 200,   # Changed from -300 to 200 (Moves map UP ~500m)
     "img_scale": 1.04,  
     "target_x": 7441,   
     "target_y": 7043    
 }
 
 MAP_CONFIG = {
-    "Chernarus": {"size": 15360, "image": "map_chernarus.png"}, # 15360 is the exact edge
+    "Chernarus": {"size": 15360, "image": "map_chernarus.png"}, 
     "Livonia": {"size": 12800, "image": "map_livonia.png"},
     "Sakhal": {"size": 8192, "image": "map_sakhal.png"}
 }
@@ -259,23 +259,18 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
             name="Logs"
         ))
 
-    # H. RULERS (Visual Grid Only)
-    # 0 to 15360 -> We create ticks exactly at 0, 1000, 2000... 15000
+    # H. RULERS
     grid_vals_x = []
     grid_text_x = []
-    
-    # We stop at 15000 so we don't draw a line at 16000 (which is off map)
     for i in range(16): 
         grid_vals_x.append(i * 1000)
         grid_text_x.append(f"{i:02d}")
 
-    # For Y axis (15 -> 0)
     grid_vals_y = []
     grid_text_y = []
     for i in range(16): 
         grid_vals_y.append(i * 1000)      
-        # i=0 (Bottom) -> Label 15
-        grid_text_y.append(f"{15-i:02d}") 
+        grid_text_y.append(f"{15-i:02d}")
 
     # I. LAYOUT
     fig.update_layout(
@@ -289,7 +284,6 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
         
         xaxis=dict(
             visible=True, 
-            # CLAMPED: Exact Map Edge (0 to 15360)
             range=[0, map_size], 
             side="top",
             showgrid=settings['show_grid'], gridcolor="rgba(255, 255, 255, 0.2)",
@@ -299,7 +293,6 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
 
         yaxis=dict(
             visible=True, 
-            # CLAMPED: Exact Map Edge (0 to 15360)
             range=[0, map_size], 
             side="left",
             showgrid=settings['show_grid'], gridcolor="rgba(255, 255, 255, 0.2)",
@@ -368,9 +361,10 @@ def main():
 
             with st.expander("🖼️ Map Image", expanded=True):
                 st.info("Align map to Target.")
-                img_off_x = st.slider("Image X", -2000, 2000, DEFAULT_CALIBRATION['img_off_x'], 10, key="cal_img_x_clean") 
-                img_off_y = st.slider("Image Y", -2000, 2000, DEFAULT_CALIBRATION['img_off_y'], 10, key="cal_img_y_clean") 
-                img_scale = st.slider("Image Scale", 0.8, 1.2, DEFAULT_CALIBRATION['img_scale'], 0.001, key="cal_img_scale_clean") 
+                # Added "final" suffix to keys to ensure slider reset
+                img_off_x = st.slider("Image X", -2000, 2000, DEFAULT_CALIBRATION['img_off_x'], 10, key="cal_img_x_final") 
+                img_off_y = st.slider("Image Y", -2000, 2000, DEFAULT_CALIBRATION['img_off_y'], 10, key="cal_img_y_final") 
+                img_scale = st.slider("Image Scale", 0.8, 1.2, DEFAULT_CALIBRATION['img_scale'], 0.001, key="cal_img_scale_final") 
                 img_opacity = st.slider("Opacity", 0.1, 1.0, 1.0, 0.1)
 
             with st.expander("⚙️ Settings", expanded=False):
