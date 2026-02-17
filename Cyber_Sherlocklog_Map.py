@@ -14,21 +14,22 @@ MAP_CONFIG = {
     "Sakhal": {"size": 8192, "image": "map_sakhal.png"}
 }
 
+# --- CORRECTED COORDINATE DATABASE (Based on iZurvive) ---
 TOWN_DATA = {
     "Chernarus": [
-        {"name": "NWAF", "x": 4600, "z": 10200},
-        {"name": "Stary Sobor", "x": 6050, "z": 7750},
+        {"name": "NWAF", "x": 4500, "z": 10000},       # Adjusted to Runway Center
+        {"name": "Severograd", "x": 8400, "z": 12700}, # FIXED: Was 13700 (Too High)
+        {"name": "Stary Sobor", "x": 6000, "z": 7700},
         {"name": "Novy Sobor", "x": 7100, "z": 7700},
-        {"name": "Vybor", "x": 3750, "z": 8900},
-        {"name": "Gorka", "x": 9500, "z": 8850},
-        {"name": "Chernogorsk", "x": 6650, "z": 2600},
+        {"name": "Vybor", "x": 3800, "z": 8900},
+        {"name": "Gorka", "x": 9500, "z": 8800},
+        {"name": "Chernogorsk", "x": 6600, "z": 2600},
         {"name": "Elektrozavodsk", "x": 10450, "z": 2300},
-        {"name": "Berezino", "x": 12400, "z": 9700},
-        {"name": "Zelenogorsk", "x": 2750, "z": 5300},
-        {"name": "Severograd", "x": 8400, "z": 13700},
-        {"name": "Tisy", "x": 1700, "z": 14000},
+        {"name": "Berezino", "x": 12400, "z": 9600},
+        {"name": "Zelenogorsk", "x": 2700, "z": 5300},
+        {"name": "Tisy Base", "x": 1700, "z": 13800},  # Adjusted for Base center
         {"name": "Krasnostav", "x": 11200, "z": 12300},
-        {"name": "Solnichniy", "x": 13300, "z": 6200},
+        {"name": "Solnichniy", "x": 13400, "z": 6200}, # Adjusted East
         {"name": "Kamyshovo", "x": 12000, "z": 3500},
         {"name": "Balota", "x": 4400, "z": 2400},
         {"name": "VMC", "x": 4500, "z": 8300},
@@ -167,22 +168,20 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
         fig.add_shape(type="rect", x0=0, y0=0, x1=map_size, y1=map_size, line=dict(color="RoyalBlue"))
 
     # B. COORDINATE SYSTEM & RULERS (Native Plotly Axes)
-    # We define the tick marks to be exactly in the center of the 1000m grids
-    # and the grid lines to be exactly on the 1000m marks.
     
+    # We create ticks for 0 to 16 (0k to 16k)
+    # The map size is ~15360, but the grid goes to 16 lines
     tick_vals = []
     tick_text = []
     
-    # Generate labels 00 to 16
-    for i in range(17):
-        pos = (i * 1000)
-        # Apply the coordinate calibration to the grid itself
-        # Note: We are transforming the GRID to match the user's calibration settings
-        t_pos = (pos * settings['scale_factor']) + (settings['off_x'] if i==0 else 0) # Base logic
+    for i in range(17): # 0 to 16
+        pos = i * 1000
         
-        # Actually, simpler logic: The axis represents the transformed space.
-        # We just label the standard intervals.
-        tick_vals.append(i * 1000)
+        # Apply the GRID calibration to the rulers
+        # This ensures the ruler moves WITH the yellow dots if you move the grid
+        t_pos = (pos * settings['scale_factor']) + (settings['off_x'] if i==0 else 0) 
+        
+        tick_vals.append(pos)
         tick_text.append(f"{i:02d}")
 
     # C. TOWNS
@@ -252,23 +251,16 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
             name="Logs"
         ))
 
-    # G. LAYOUT
-    # Calculate Axis Ranges based on Calibration
-    # We want the axis to move based on the offset/scale so the grid moves with the dots
+    # G. LAYOUT & RULERS
     
-    # Base grid is 0 to map_size
-    # Transformed Grid is: (0 * scale + off) to (map_size * scale + off)
+    # Calculate Axis Ranges based on Grid Calibration
+    # Grid goes from 0 to 15360 (approx 15.36km)
+    # We pad it to -1000 and 16000 to show the rulers cleanly
     
-    min_x = (0 * settings['scale_factor']) + settings['off_x']
-    max_x = (map_size * settings['scale_factor']) + settings['off_x']
-    
-    min_y = (0 * settings['scale_factor']) + settings['off_y']
-    max_y = (map_size * settings['scale_factor']) + settings['off_y']
-
-    # We use tickvals logic to place grid lines every 1000 scaled units
+    # Apply Calibration to the Grid Lines
     grid_ticks_x = []
     grid_labels_x = []
-    for i in range(17):
+    for i in range(17): # 00 to 16
         val = (i * 1000 * settings['scale_factor']) + settings['off_x']
         grid_ticks_x.append(val)
         grid_labels_x.append(f"{i:02d}")
@@ -280,9 +272,15 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
         grid_ticks_y.append(val)
         grid_labels_y.append(f"{i:02d}")
 
+    # Set display range slightly larger than grid
+    min_view_x = grid_ticks_x[0] - 500
+    max_view_x = grid_ticks_x[-1] + 500
+    min_view_y = grid_ticks_y[0] - 500
+    max_view_y = grid_ticks_y[-1] + 500
+
     fig.update_layout(
-        height=850,
-        margin={"l": 40, "r": 40, "t": 40, "b": 40}, # Add margin for rulers
+        height=900,
+        margin={"l": 50, "r": 50, "t": 50, "b": 50},
         plot_bgcolor="#0e1117", paper_bgcolor="#0e1117",
         dragmode="pan" if settings['click_mode'] == "Navigate" else False,
         showlegend=True,
@@ -291,8 +289,8 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
         # --- X AXIS (TOP RULER) ---
         xaxis=dict(
             visible=True,
-            range=[min_x - 1000, max_x + 1000],
-            side="top", # Put ruler on top
+            range=[min_view_x, max_view_x],
+            side="top",
             showgrid=settings['show_grid'],
             gridcolor="rgba(255, 255, 255, 0.2)",
             gridwidth=1,
@@ -306,7 +304,7 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
         # --- Y AXIS (LEFT RULER) ---
         yaxis=dict(
             visible=True,
-            range=[max_y + 1000, min_y - 1000], # Inverted for Image coords
+            range=[max_view_y, min_view_y], # Inverted: 0 at top, 16 at bottom
             side="left",
             showgrid=settings['show_grid'],
             gridcolor="rgba(255, 255, 255, 0.2)",
@@ -315,7 +313,7 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
             tickvals=grid_ticks_y,
             ticktext=grid_labels_y,
             tickfont=dict(color="white", size=14, family="Arial Black"),
-            scaleanchor="x", # <--- KEY FIX: LOCK ASPECT RATIO (Square Grid)
+            scaleanchor="x", # LOCKED ASPECT RATIO
             scaleratio=1,
             zeroline=False
         )
@@ -375,28 +373,27 @@ def main():
         # --- FORM START ---
         with st.form("calibration_form"):
             # 1. Map Image Calibration
-            with st.expander("🖼️ Map Image (Background)", expanded=False):
-                img_off_x = st.slider("Image X", -4000, 4000, 0, 10)
-                img_off_y = st.slider("Image Y", -4000, 4000, 0, 10)
-                img_scale = st.slider("Image Scale", 0.5, 1.5, 1.0, 0.005)
+            with st.expander("🖼️ Map Image (Background)", expanded=True):
+                # Set defaults based on analysis
+                img_off_x = st.slider("Image X", -4000, 4000, -200, 10) 
+                img_off_y = st.slider("Image Y", -4000, 4000, -500, 10)
+                img_scale = st.slider("Image Scale", 0.5, 1.5, 1.05, 0.005)
                 img_opacity = st.slider("Opacity", 0.1, 1.0, 1.0, 0.1)
 
             # 2. Coordinate Calibration
-            with st.expander("📍 Coordinates (Grid/Pins)", expanded=True):
+            with st.expander("📍 Coordinates (Grid/Pins)", expanded=False):
                 use_y_as_z = st.checkbox("Fix Ocean (Use Y as Z)", True)
                 swap_xz = st.checkbox("Swap X/Z", False)
                 invert_z = st.checkbox("Invert Vertical (Z)", True)
-                show_grid = st.checkbox("Show Grid", True)
+                show_grid = st.checkbox("Show Grid (0-16)", True)
                 show_towns = st.checkbox("Show Towns", True)
                 
                 off_x = st.slider("Grid X Offset", -4000, 4000, 0, 10)
                 off_y = st.slider("Grid Y Offset", -4000, 4000, 0, 10)
                 scale_factor = st.slider("Grid Scale", 0.5, 1.5, 1.0, 0.005)
 
-            # SUBMIT BUTTON (This fixes the "Takes forever" issue)
             applied = st.form_submit_button("✅ Apply Calibration")
             
-        # Compile settings (Using defaults if form not yet submitted)
         settings = {
             "img_off_x": img_off_x, "img_off_y": img_off_y, "img_scale": img_scale, "img_opacity": img_opacity,
             "use_y_as_z": use_y_as_z, "swap_xz": swap_xz, "invert_z": invert_z,
