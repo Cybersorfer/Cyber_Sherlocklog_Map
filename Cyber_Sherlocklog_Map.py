@@ -8,7 +8,7 @@ from datetime import datetime
 # --- 1. CONFIGURATION & SAVED CALIBRATION ---
 st.set_page_config(layout="wide", page_title="DayZ Intel Mapper")
 
-# ⚠️ UPDATED WINNING NUMBERS (Grid Locked)
+# ⚠️ UPDATED WINNING NUMBERS (Map Pulled UP +300m)
 DEFAULT_CALIBRATION = {
     "img_off_x": 0,     
     "img_off_y": 500,   
@@ -137,12 +137,11 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
     map_size = config["size"]
     fig = go.Figure()
 
-    # A. IMAGE LAYER (Background)
+    # A. IMAGE LAYER
     img = load_map_image(config["image"])
     if img:
         img_width = map_size * settings['img_scale']
         img_height = map_size * settings['img_scale']
-        # Apply Calibration Offsets
         img_x = settings['img_off_x']
         img_y = map_size + settings['img_off_y'] 
         
@@ -159,24 +158,32 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
     else:
         fig.add_shape(type="rect", x0=0, y0=0, x1=map_size, y1=map_size, line=dict(color="RoyalBlue"))
 
-    # B. PHYSICAL GRID LINES (The Fix)
-    # Instead of relying on Axis Grid, we draw literal lines on the map.
-    # Vertical Lines (X)
+    # B. PHYSICAL GRID TRACE (The Fix: Scatter Trace instead of Shapes)
+    # We construct one single continuous line for the grid. 
+    # This treats the grid as "Data" so it moves exactly with markers.
     if settings['show_grid']:
-        for i in range(1, 16): # 1 to 15 (0 and 16 are edges)
+        grid_x = []
+        grid_y = []
+        
+        # Vertical Lines (0 to 15)
+        for i in range(16): 
             pos = i * 1000
-            # Draw Vertical Line
-            fig.add_shape(
-                type="line", x0=pos, y0=0, x1=pos, y1=map_size,
-                line=dict(color="rgba(255, 255, 255, 0.15)", width=1),
-                layer="above" # Draws ON TOP of the image
-            )
-            # Draw Horizontal Line
-            fig.add_shape(
-                type="line", x0=0, y0=pos, x1=map_size, y1=pos,
-                line=dict(color="rgba(255, 255, 255, 0.15)", width=1),
-                layer="above"
-            )
+            grid_x.extend([pos, pos, None]) # Line from Bottom to Top, then break
+            grid_y.extend([0, map_size, None])
+            
+        # Horizontal Lines (0 to 15)
+        for i in range(16): 
+            pos = i * 1000
+            grid_x.extend([0, map_size, None]) # Line from Left to Right, then break
+            grid_y.extend([pos, pos, None])
+
+        fig.add_trace(go.Scatter(
+            x=grid_x, y=grid_y,
+            mode='lines',
+            line=dict(color='rgba(255, 255, 255, 0.2)', width=1),
+            hoverinfo='skip',
+            name='Grid'
+        ))
 
     # C. SENSOR LAYER (Invisible Heatmap)
     fig.add_trace(go.Heatmap(
@@ -259,14 +266,14 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
             sizes = [15 if m else 5 for m in mask]
 
         fig.add_trace(go.Scatter(
-            x=fx, y=fy, mode='markers',
+            x=fx, y=fz, mode='markers',
             marker=dict(size=sizes, color=colors, line=dict(width=1, color='white')),
             text=df["name"], customdata=df["activity"],
             hovertemplate="<b>%{text}</b><br>Game: %{x:.0f} / %{y:.0f}<br>%{customdata}<extra></extra>",
             name="Logs"
         ))
 
-    # I. RULERS (Ticks only)
+    # I. RULERS (Visual Labels Only)
     grid_vals_x = []
     grid_text_x = []
     for i in range(16): 
@@ -290,16 +297,16 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
         
         xaxis=dict(
             visible=True, range=[0, map_size], side="top",
-            showgrid=False, # We draw our own grid now!
-            gridcolor="rgba(0,0,0,0)", # Hidden native grid
+            showgrid=False, # We use the Scatter Grid Trace now
+            gridcolor="rgba(0,0,0,0)", 
             tickmode="array", tickvals=grid_vals_x, ticktext=grid_text_x,
             tickfont=dict(color="white", size=14, family="Arial Black"), zeroline=False
         ),
 
         yaxis=dict(
             visible=True, range=[0, map_size], side="left",
-            showgrid=False, # We draw our own grid now!
-            gridcolor="rgba(0,0,0,0)", # Hidden native grid
+            showgrid=False, # We use the Scatter Grid Trace now
+            gridcolor="rgba(0,0,0,0)",
             tickmode="array", tickvals=grid_vals_y, ticktext=grid_text_y,
             tickfont=dict(color="white", size=14, family="Arial Black"),
             scaleanchor="x", scaleratio=1, zeroline=False
@@ -365,7 +372,6 @@ def main():
 
             with st.expander("🖼️ Map Image", expanded=True):
                 st.info("Align map to Target.")
-                # Added 'final_3' to keys to force refresh
                 img_off_x = st.slider("Image X", -2000, 2000, DEFAULT_CALIBRATION['img_off_x'], 10, key="cal_img_x_final_3") 
                 img_off_y = st.slider("Image Y", -2000, 2000, DEFAULT_CALIBRATION['img_off_y'], 10, key="cal_img_y_final_3") 
                 img_scale = st.slider("Image Scale", 0.8, 1.2, DEFAULT_CALIBRATION['img_scale'], 0.001, key="cal_img_scale_final_3") 
