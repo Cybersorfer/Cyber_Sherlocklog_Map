@@ -5,18 +5,23 @@ import pandas as pd
 from PIL import Image
 from datetime import datetime
 
-# --- 1. CONFIGURATION & LOCKED SETTINGS ---
+# --- 1. CONFIGURATION & LOCKED CALIBRATION ---
 st.set_page_config(layout="wide", page_title="DayZ Intel Mapper")
 
-# 🔒 HARDCODED WINNING NUMBERS (No Sliders, No Menu)
+# 🔒 HARDCODED "WINNING" SETTINGS (No Menus, No Sliders)
 LOCKED_SETTINGS = {
+    # Map Image Alignment (Verified)
     "img_off_x": 127,
     "img_off_y": 628,
     "img_scale": 1.04,
     "img_opacity": 1.0,
+    
+    # Log Data Alignment (Verified from your manual tuning)
     "log_off_x": 150,
     "log_off_y": 40,
-    "log_format": "Format: <X, Y, Z>", # Your verified format
+    
+    # Logic Defaults
+    "swap_xy": False,
     "show_grid": True,
     "show_towns": True
 }
@@ -140,6 +145,7 @@ def parse_poi_csv(uploaded_csv):
 
 # --- 3. COORDINATE MATH ---
 def transform_coords(game_x, game_y, settings):
+    # This function is kept simple as we rely on the renderer to handle offsets now
     return game_x, game_y
 
 # --- 4. RENDER ENGINE ---
@@ -190,8 +196,9 @@ def render_map(df, map_name, settings, search_term, active_layers, poi_db):
     if settings['show_towns'] and map_name in TOWN_DATA:
         t_x, t_y, t_names = [], [], []
         for town in TOWN_DATA[map_name]:
-            tx, ty = transform_coords(town['x'], town['y'], settings)
-            t_x.append(tx); t_y.append(ty); t_names.append(town['name'])
+            t_x.append(town['x'])
+            t_y.append(town['y'])
+            t_names.append(town['name'])
         
         fig.add_trace(go.Scatter(
             x=t_x, y=t_y, mode='markers+text', text=t_names, textposition="top center",
@@ -206,8 +213,9 @@ def render_map(df, map_name, settings, search_term, active_layers, poi_db):
             if layer_name in active_layers:
                 l_x, l_y, l_txt = [], [], []
                 for loc in locations:
-                    tx, ty = transform_coords(loc['x'], loc['y'], settings)
-                    l_x.append(tx); l_y.append(ty); l_txt.append(loc['name'])
+                    l_x.append(loc['x'])
+                    l_y.append(loc['y'])
+                    l_txt.append(loc['name'])
                 
                 color = "cyan"
                 if "Military" in layer_name: color = "red"
@@ -220,36 +228,36 @@ def render_map(df, map_name, settings, search_term, active_layers, poi_db):
                     hovertemplate="<b>%{text}</b><br>Game: %{x:.0f} / %{y:.0f}<extra></extra>"
                 ))
 
-    # D. PLAYERS (LOGS)
+    # D. PLAYERS (LOGS) - HARDCODED FORMAT <X, Y, Z>
     if not df.empty:
+        # According to your server logs: 
+        # raw_1 = X
+        # raw_2 = Y (North) -> THIS IS THE ONE WE USE
+        # raw_3 = Z (Height)
+        
         raw_x = df["raw_1"]
-        raw_y = df["raw_2"] # LOCKED to Format <X, Y, Z>
+        raw_y = df["raw_2"] 
         
-        fx, fy = transform_coords(raw_x, raw_y, settings)
-        
-        # Apply Locked Log Offset
-        fx = fx + settings['log_off_x']
-        fy = fy + settings['log_off_y']
+        # Apply the Hardcoded "Winning" Log Offset
+        # We process it as Vector Arrays for performance
+        fx = raw_x + settings['log_off_x']
+        fy = raw_y + settings['log_off_y']
         
         if search_term:
             df['filtered'] = df['name'].str.contains(search_term, case=False, na=False)
             df_plot = df[df['filtered']].copy()
             if not df_plot.empty:
-                # Re-calculate subsets for safe indexing
                 p_x = df_plot["raw_1"]
                 p_y = df_plot["raw_2"]
-                p_fx, p_fy = transform_coords(p_x, p_y, settings)
-                p_fx = p_fx + settings['log_off_x']
-                p_fy = p_fy + settings['log_off_y']
                 
-                adm_x = df_plot["raw_1"]
-                adm_y = p_y
+                p_fx = p_x + settings['log_off_x']
+                p_fy = p_y + settings['log_off_y']
                 
                 fig.add_trace(go.Scatter(
                     x=p_fx, y=p_fy, mode='text',
                     text=df_plot["icon"],
                     textfont=dict(size=14),
-                    customdata=list(zip(df_plot["time_str"], df_plot["name"], adm_x, adm_y)),
+                    customdata=list(zip(df_plot["time_str"], df_plot["name"], p_x, p_y)),
                     hovertemplate="<b>%{customdata[0]}</b><br>Player: %{customdata[1]}<br>ADM: %{customdata[2]:.1f} / %{customdata[3]:.1f}<extra></extra>",
                     name="Logs"
                 ))
@@ -271,16 +279,15 @@ def render_map(df, map_name, settings, search_term, active_layers, poi_db):
     for i in range(16): 
         grid_vals_y.append(i * 1000); grid_text_y.append(f"{15-i:02d}")
 
-    # F. LAYOUT (Cleaned Up)
+    # F. LAYOUT (Optimized margins & Click disabled)
     fig.update_layout(
         height=900,
-        # Massive Top Margin to clear the toolbar
+        # Massive Top Margin (80px) ensures Modebar does not cover grid
         margin={"l": 40, "r": 40, "t": 80, "b": 40}, 
         plot_bgcolor="#0e1117", paper_bgcolor="#0e1117",
         dragmode="pan", 
-        hovermode="closest", 
-        showlegend=True,
-        # Moved Legend to Bottom Left to stop overlapping map data
+        hovermode="closest", showlegend=True,
+        # Legend moved to Bottom Left to stop overlapping map
         legend=dict(yanchor="bottom", y=0.01, xanchor="left", x=0.01, bgcolor="rgba(0,0,0,0.6)", font=dict(color="white")),
         
         xaxis=dict(
@@ -302,20 +309,25 @@ def render_map(df, map_name, settings, search_term, active_layers, poi_db):
 
 # --- 5. UI MAIN ---
 def main():
-    # AGGRESSIVE CSS to hide Streamlit UI elements
+    # AGGRESSIVE CSS to kill Header, Menu, and Footer
     st.markdown("""
     <style>
         .stApp { background-color: #0e1117; color: #fafafa; }
         [data-testid="stSidebar"] { background-color: #262730; }
         
-        /* KILL THE WHITE HEADER & MENU */
-        header { visibility: hidden !important; height: 0px !important; }
-        #MainMenu { visibility: hidden !important; }
-        footer { visibility: hidden !important; }
+        /* HIDE HEADER completely */
+        header[data-testid="stHeader"] { display: none !important; }
+        
+        /* HIDE Main Menu (Hamburger) and Footer */
+        #MainMenu { display: none !important; }
+        footer { display: none !important; }
+        
+        /* HIDE Decoration bar */
+        [data-testid="stDecoration"] { display: none !important; }
         
         /* Push content up to fill the void */
         .block-container { 
-            padding-top: 0rem !important; 
+            padding-top: 1rem !important; 
             padding-bottom: 0rem !important; 
         }
     </style>
@@ -324,9 +336,11 @@ def main():
     with st.sidebar:
         st.title("🗺️ Intel Control")
         selected_map = st.selectbox("Map", list(MAP_CONFIG.keys()))
+        
         st.write("---")
         uploaded_log = st.file_uploader("1. Upload Logs", type=['adm', 'rpt', 'log'])
-        st.caption("ℹ️ **Upload POI DB**: Optional CSV for permanent bases/traders.")
+        
+        st.caption("ℹ️ **Upload POI DB**: Optional. CSV for permanent bases/traders.")
         uploaded_csv = st.file_uploader("2. Upload POI DB", type=['csv'])
         
         if uploaded_csv:
@@ -359,10 +373,11 @@ def main():
     with col1: 
         st.subheader(f"📍 {selected_map}")
     
-    # Render map (No sliders, no calibration passed)
+    # Render with HARDCODED LOCKED settings
     fig, map_size = render_map(df, selected_map, LOCKED_SETTINGS, search_term, active_layers, current_db)
 
-    # PURE VIEWER MODE: No 'on_select', no 'selection_mode'
+    # PURE VIEWER MODE: All interactive features disabled
+    # config dictionary explicitly removes selection tools
     st.plotly_chart(
         fig, 
         use_container_width=True,
@@ -370,7 +385,6 @@ def main():
             'scrollZoom': True, 
             'displayModeBar': True, 
             'displaylogo': False,
-            # Remove tools that might trigger weird states
             'modeBarButtonsToRemove': ['select2d', 'lasso2d', 'autoScale2d', 'resetScale2d']
         }
     )
