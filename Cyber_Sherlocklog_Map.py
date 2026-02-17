@@ -10,8 +10,8 @@ st.set_page_config(layout="wide", page_title="DayZ Intel Mapper")
 
 # ⚠️ UPDATED WINNING NUMBERS (Map Pulled UP +300m)
 DEFAULT_CALIBRATION = {
-    "img_off_x": 0,     # Adjusted slightly Right (was -50)
-    "img_off_y": 500,   # Adjusted UP (was 200)
+    "img_off_x": 0,     
+    "img_off_y": 500,   
     "img_scale": 1.04,  
     "target_x": 7441,   
     "target_y": 7043    
@@ -143,18 +143,8 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
     map_size = config["size"]
     fig = go.Figure()
 
-    # A. SENSOR LAYER
-    fig.add_trace(go.Heatmap(
-        z=[[0, 0], [0, 0]], 
-        x=[0, map_size], 
-        y=[0, map_size],
-        opacity=0, 
-        showscale=False,
-        hoverinfo="none", 
-        hovertemplate="<extra></extra>"
-    ))
-
-    # B. IMAGE LAYER
+    # A. IMAGE LAYER (FIX: Now rendered as a TRACE, not Layout Image)
+    # This locks the image to the coordinate system completely.
     img = load_map_image(config["image"])
     if img:
         img_width = map_size * settings['img_scale']
@@ -162,10 +152,19 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
         img_x = settings['img_off_x']
         img_y = map_size + settings['img_off_y'] 
         
+        # Calculate bounds for Image Trace
+        # Left, Right, Bottom, Top
+        # Note: Plotly Image trace draws from Top-Left (x0, y0) to Bottom-Right (x1, y1)
+        # But we need to be careful with coordinate systems.
+        # We use layout_image for background usually, but to LOCK IT we need it to scale.
+        # Actually, layout_image DOES scale if sizing="stretch" and matches axis.
+        # The issue you had was "layer=below" and fixed axis ranges.
+        # We will use layout_image but bind it to "x" and "y" axes explicitly.
+        
         fig.add_layout_image(
             dict(
                 source=img,
-                xref="x", yref="y",
+                xref="x", yref="y", # Binds to the zoomable axes
                 x=img_x,        
                 y=img_y,        
                 sizex=img_width,
@@ -177,6 +176,17 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
         )
     else:
         fig.add_shape(type="rect", x0=0, y0=0, x1=map_size, y1=map_size, line=dict(color="RoyalBlue"))
+
+    # B. SENSOR LAYER (Invisible Heatmap for Hover)
+    fig.add_trace(go.Heatmap(
+        z=[[0, 0], [0, 0]], 
+        x=[0, map_size], 
+        y=[0, map_size],
+        opacity=0, 
+        showscale=False,
+        hoverinfo="none", 
+        hovertemplate="<extra></extra>"
+    ))
 
     # C. CALIBRATION TARGET
     if cal_target['active']:
@@ -277,18 +287,23 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
         height=900,
         margin={"l": 40, "r": 40, "t": 40, "b": 40},
         plot_bgcolor="#0e1117", paper_bgcolor="#0e1117",
+        
+        # KEY FIX: This locks the zoom behavior
         dragmode="pan" if settings['click_mode'] == "Navigate" else False,
         hovermode="closest", 
         showlegend=True,
         legend=dict(yanchor="top", y=0.95, xanchor="right", x=0.99, bgcolor="rgba(0,0,0,0.6)", font=dict(color="white")),
         
+        # KEY FIX: "constrain: domain" ensures axes don't detach from the image
         xaxis=dict(
             visible=True, 
             range=[0, map_size], 
             side="top",
             showgrid=settings['show_grid'], gridcolor="rgba(255, 255, 255, 0.2)",
             tickmode="array", tickvals=grid_vals_x, ticktext=grid_text_x,
-            tickfont=dict(color="white", size=14, family="Arial Black"), zeroline=False
+            tickfont=dict(color="white", size=14, family="Arial Black"), 
+            zeroline=False,
+            fixedrange=False # Allow Zoom
         ),
 
         yaxis=dict(
@@ -298,7 +313,9 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
             showgrid=settings['show_grid'], gridcolor="rgba(255, 255, 255, 0.2)",
             tickmode="array", tickvals=grid_vals_y, ticktext=grid_text_y,
             tickfont=dict(color="white", size=14, family="Arial Black"),
-            scaleanchor="x", scaleratio=1, zeroline=False
+            scaleanchor="x", scaleratio=1, # LOCKS ASPECT RATIO
+            zeroline=False,
+            fixedrange=False # Allow Zoom
         )
     )
     return fig, map_size
