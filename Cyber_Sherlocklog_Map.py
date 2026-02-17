@@ -10,17 +10,13 @@ st.set_page_config(layout="wide", page_title="DayZ Intel Mapper")
 
 # 🔒 HARDCODED "WINNING" SETTINGS (No Menus, No Sliders)
 LOCKED_SETTINGS = {
-    # Map Image Alignment (Verified)
     "img_off_x": 127,
     "img_off_y": 628,
     "img_scale": 1.04,
     "img_opacity": 1.0,
-    
-    # Log Data Alignment (Verified from your manual tuning)
     "log_off_x": 150,
     "log_off_y": 40,
-    
-    # Logic Defaults
+    "log_format": "Format: <X, Y, Z>",
     "swap_xy": False,
     "show_grid": True,
     "show_towns": True
@@ -32,27 +28,71 @@ MAP_CONFIG = {
     "Sakhal": {"size": 8192, "image": "map_sakhal.png"}
 }
 
-# --- DATABASE ---
+# --- DATABASE (Updated from User Screenshots) ---
 TOWN_DATA = {
     "Chernarus": [
-        {"name": "NWAF", "x": 4600, "y": 10200},
-        {"name": "Severograd", "x": 8400, "y": 12700},
-        {"name": "Stary Sobor", "x": 6050, "y": 7750},
-        {"name": "Novy Sobor", "x": 7100, "y": 7700},
-        {"name": "Vybor", "x": 3750, "y": 8900},
+        # --- Major Cities ---
+        {"name": "Chernogorsk", "x": 6600, "y": 2500},
+        {"name": "Elektrozavodsk", "x": 10200, "y": 2300},
+        {"name": "Berezino", "x": 12300, "y": 9500},
+        {"name": "Severograd", "x": 8400, "y": 13600},
+        {"name": "Novodmitrovsk", "x": 11500, "y": 14300},
+        {"name": "Zelenogorsk", "x": 2700, "y": 5300},
+        {"name": "Novaya Petrovka", "x": 3500, "y": 12400},
+        {"name": "Svetlojarsk", "x": 13900, "y": 13300},
+
+        # --- Mid-Tier Towns ---
+        {"name": "Balota", "x": 4600, "y": 2500},
+        {"name": "Kamenka", "x": 1800, "y": 2200},
+        {"name": "Komarovo", "x": 3600, "y": 2400},
+        {"name": "Pavlovo", "x": 1600, "y": 3800},
+        {"name": "Kozlovka", "x": 4400, "y": 4600},
+        {"name": "Mogilevka", "x": 7500, "y": 5100},
+        {"name": "Nadezhdino", "x": 5800, "y": 4700},
+        {"name": "Staroye", "x": 10100, "y": 5500},
         {"name": "Gorka", "x": 9500, "y": 8800},
-        {"name": "Chernogorsk", "x": 6650, "y": 2600},
-        {"name": "Elektrozavodsk", "x": 10450, "y": 2300},
-        {"name": "Berezino", "x": 12400, "y": 9600},
-        {"name": "Zelenogorsk", "x": 2750, "y": 5300},
-        {"name": "Tisy Base", "x": 1700, "y": 14000},
-        {"name": "Krasnostav", "x": 11200, "y": 12300},
-        {"name": "Solnichniy", "x": 13350, "y": 6200},
+        {"name": "Novy Sobor", "x": 7100, "y": 7700},
+        {"name": "Stary Sobor", "x": 6000, "y": 7700},
+        {"name": "Vybor", "x": 3800, "y": 8900},
+        {"name": "Kabanino", "x": 5300, "y": 8600},
+        {"name": "Grishino", "x": 5900, "y": 10300},
+        {"name": "Krasnostav", "x": 11100, "y": 12300},
+        {"name": "Solnichniy", "x": 13300, "y": 6200},
+        {"name": "Nizhnoye", "x": 13000, "y": 8200},
         {"name": "Kamyshovo", "x": 12000, "y": 3500},
-        {"name": "Balota", "x": 4400, "y": 2400},
-        {"name": "VMC", "x": 4500, "y": 8300},
-        {"name": "Altar", "x": 8100, "y": 9300},
-        {"name": "Radio Zenit", "x": 7900, "y": 9700}
+
+        # --- Villages & Small Settlements ---
+        {"name": "Berezhki", "x": 13500, "y": 14500},
+        {"name": "Black Lake", "x": 13300, "y": 11500},
+        {"name": "Bor", "x": 3300, "y": 3900},
+        {"name": "Dolina", "x": 11200, "y": 6500},
+        {"name": "Drozhino", "x": 3400, "y": 4800},
+        {"name": "Dubrovka", "x": 10400, "y": 9800},
+        {"name": "Guglovo", "x": 8500, "y": 6600},
+        {"name": "Gvozdno", "x": 8600, "y": 11900},
+        {"name": "Khelm", "x": 12300, "y": 10800},
+        {"name": "Lopatino", "x": 2700, "y": 9700},
+        {"name": "Msta", "x": 11200, "y": 5400},
+        {"name": "Myshkino", "x": 2000, "y": 8000},
+        {"name": "Olsha", "x": 13300, "y": 12800},
+        {"name": "Orlovets", "x": 12100, "y": 7200},
+        {"name": "Petrovka", "x": 5000, "y": 12500},
+        {"name": "Pogorevka", "x": 4600, "y": 6500},
+        {"name": "Polana", "x": 10700, "y": 8100},
+        {"name": "Prigorodki", "x": 7800, "y": 3200},
+        {"name": "Pulkovo", "x": 4900, "y": 5600},
+        {"name": "Pusta", "x": 9100, "y": 3900},
+        {"name": "Pustoshka", "x": 3000, "y": 9600},
+        {"name": "Ratnoe", "x": 5800, "y": 13400},
+        {"name": "Rogovo", "x": 4700, "y": 8500},
+        {"name": "Shakhovka", "x": 9600, "y": 6500},
+        {"name": "Sinystok", "x": 1300, "y": 12100},
+        {"name": "Sosnovka", "x": 2500, "y": 6400},
+        {"name": "Topolniki", "x": 14300, "y": 10800},
+        {"name": "Tisy (Town)", "x": 1600, "y": 13700},
+        {"name": "Tulga", "x": 12800, "y": 4400},
+        {"name": "Vyshnoye", "x": 6600, "y": 6100},
+        {"name": "Vysotovo", "x": 6000, "y": 2700}
     ],
     "Livonia": [
         {"name": "Topolin", "x": 6200, "y": 11000},
@@ -66,8 +106,19 @@ TOWN_DATA = {
 
 DEFAULT_POI_DATABASE = {
     "Chernarus": {
-        "🛡️ Military": [{"name": "Tisy Radar", "x": 1700, "y": 14000}],
-        "🏰 Castles": [{"name": "Devil's Castle", "x": 6800, "y": 11500}],
+        # --- Key Military & Landmarks ---
+        "🛡️ Military": [
+            {"name": "NWAF", "x": 4600, "y": 10400},
+            {"name": "Tisy Military Base", "x": 1600, "y": 14000},
+            {"name": "Troitskoe Military", "x": 7200, "y": 14600},
+            {"name": "Kamensk Military", "x": 7800, "y": 12800},
+            {"name": "Myshkino Tents", "x": 1000, "y": 7500}
+        ],
+        "🏰 Landmarks": [
+            {"name": "Green Mountain", "x": 3700, "y": 5900},
+            {"name": "Altar", "x": 8100, "y": 9100},
+            {"name": "Devil's Castle", "x": 6800, "y": 11500}
+        ]
     }
 }
 
@@ -145,7 +196,6 @@ def parse_poi_csv(uploaded_csv):
 
 # --- 3. COORDINATE MATH ---
 def transform_coords(game_x, game_y, settings):
-    # This function is kept simple as we rely on the renderer to handle offsets now
     return game_x, game_y
 
 # --- 4. RENDER ENGINE ---
@@ -228,18 +278,13 @@ def render_map(df, map_name, settings, search_term, active_layers, poi_db):
                     hovertemplate="<b>%{text}</b><br>Game: %{x:.0f} / %{y:.0f}<extra></extra>"
                 ))
 
-    # D. PLAYERS (LOGS) - HARDCODED FORMAT <X, Y, Z>
+    # D. PLAYERS (LOGS)
     if not df.empty:
-        # According to your server logs: 
-        # raw_1 = X
-        # raw_2 = Y (North) -> THIS IS THE ONE WE USE
-        # raw_3 = Z (Height)
-        
         raw_x = df["raw_1"]
+        # Use our locked logic preference <X, Y, Z>
         raw_y = df["raw_2"] 
         
-        # Apply the Hardcoded "Winning" Log Offset
-        # We process it as Vector Arrays for performance
+        # Apply Locked Log Offset
         fx = raw_x + settings['log_off_x']
         fy = raw_y + settings['log_off_y']
         
@@ -249,24 +294,31 @@ def render_map(df, map_name, settings, search_term, active_layers, poi_db):
             if not df_plot.empty:
                 p_x = df_plot["raw_1"]
                 p_y = df_plot["raw_2"]
-                
                 p_fx = p_x + settings['log_off_x']
                 p_fy = p_y + settings['log_off_y']
+                
+                # ADM Display: Raw values from log (X and Y)
+                adm_x = df_plot["raw_1"]
+                adm_y = df_plot["raw_2"]
                 
                 fig.add_trace(go.Scatter(
                     x=p_fx, y=p_fy, mode='text',
                     text=df_plot["icon"],
                     textfont=dict(size=14),
-                    customdata=list(zip(df_plot["time_str"], df_plot["name"], p_x, p_y)),
+                    customdata=list(zip(df_plot["time_str"], df_plot["name"], adm_x, adm_y)),
                     hovertemplate="<b>%{customdata[0]}</b><br>Player: %{customdata[1]}<br>ADM: %{customdata[2]:.1f} / %{customdata[3]:.1f}<extra></extra>",
                     name="Logs"
                 ))
         else:
+            # ADM Display: Raw values from log (X and Y)
+            adm_display_x = df["raw_1"]
+            adm_display_y = df["raw_2"]
+            
             fig.add_trace(go.Scatter(
                 x=fx, y=fy, mode='text',
                 text=df["icon"],
                 textfont=dict(size=14),
-                customdata=list(zip(df["time_str"], df["name"], raw_x, raw_y)),
+                customdata=list(zip(df["time_str"], df["name"], adm_display_x, adm_display_y)),
                 hovertemplate="<b>%{customdata[0]}</b><br>Player: %{customdata[1]}<br>ADM: %{customdata[2]:.1f} / %{customdata[3]:.1f}<extra></extra>",
                 name="Logs"
             ))
@@ -282,12 +334,10 @@ def render_map(df, map_name, settings, search_term, active_layers, poi_db):
     # F. LAYOUT (Optimized margins & Click disabled)
     fig.update_layout(
         height=900,
-        # Massive Top Margin (80px) ensures Modebar does not cover grid
         margin={"l": 40, "r": 40, "t": 80, "b": 40}, 
         plot_bgcolor="#0e1117", paper_bgcolor="#0e1117",
         dragmode="pan", 
         hovermode="closest", showlegend=True,
-        # Legend moved to Bottom Left to stop overlapping map
         legend=dict(yanchor="bottom", y=0.01, xanchor="left", x=0.01, bgcolor="rgba(0,0,0,0.6)", font=dict(color="white")),
         
         xaxis=dict(
@@ -309,38 +359,24 @@ def render_map(df, map_name, settings, search_term, active_layers, poi_db):
 
 # --- 5. UI MAIN ---
 def main():
-    # AGGRESSIVE CSS to kill Header, Menu, and Footer
     st.markdown("""
     <style>
         .stApp { background-color: #0e1117; color: #fafafa; }
         [data-testid="stSidebar"] { background-color: #262730; }
-        
-        /* HIDE HEADER completely */
         header[data-testid="stHeader"] { display: none !important; }
-        
-        /* HIDE Main Menu (Hamburger) and Footer */
         #MainMenu { display: none !important; }
         footer { display: none !important; }
-        
-        /* HIDE Decoration bar */
         [data-testid="stDecoration"] { display: none !important; }
-        
-        /* Push content up to fill the void */
-        .block-container { 
-            padding-top: 1rem !important; 
-            padding-bottom: 0rem !important; 
-        }
+        .block-container { padding-top: 1rem !important; padding-bottom: 0rem !important; }
     </style>
     """, unsafe_allow_html=True)
 
     with st.sidebar:
         st.title("🗺️ Intel Control")
         selected_map = st.selectbox("Map", list(MAP_CONFIG.keys()))
-        
         st.write("---")
         uploaded_log = st.file_uploader("1. Upload Logs", type=['adm', 'rpt', 'log'])
-        
-        st.caption("ℹ️ **Upload POI DB**: Optional. CSV for permanent bases/traders.")
+        st.caption("ℹ️ **Upload POI DB**: Optional CSV for permanent bases/traders.")
         uploaded_csv = st.file_uploader("2. Upload POI DB", type=['csv'])
         
         if uploaded_csv:
@@ -376,8 +412,7 @@ def main():
     # Render with HARDCODED LOCKED settings
     fig, map_size = render_map(df, selected_map, LOCKED_SETTINGS, search_term, active_layers, current_db)
 
-    # PURE VIEWER MODE: All interactive features disabled
-    # config dictionary explicitly removes selection tools
+    # PURE VIEWER MODE
     st.plotly_chart(
         fig, 
         use_container_width=True,
