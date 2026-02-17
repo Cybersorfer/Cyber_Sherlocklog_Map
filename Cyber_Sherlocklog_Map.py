@@ -8,11 +8,11 @@ from datetime import datetime
 # --- 1. CONFIGURATION & SAVED CALIBRATION ---
 st.set_page_config(layout="wide", page_title="DayZ Intel Mapper")
 
-# ⚠️ UPDATED WINNING NUMBERS (Map Pulled UP +300m)
+# ⚠️ UPDATED WINNING NUMBERS (Scale 1.04 | Position Lifted UP)
 DEFAULT_CALIBRATION = {
     "img_off_x": 0,     
-    "img_off_y": 500,   
-    "img_scale": 1.04,  
+    "img_off_y": 850,   # Raised to 850 (Moves map UP significantly)
+    "img_scale": 1.04,  # LOCKED at 1.04 as requested
     "target_x": 7441,   
     "target_y": 7043    
 }
@@ -143,6 +143,7 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
         img_width = map_size * settings['img_scale']
         img_height = map_size * settings['img_scale']
         img_x = settings['img_off_x']
+        # The Top-Left of image is determined here.
         img_y = map_size + settings['img_off_y'] 
         
         fig.add_layout_image(
@@ -158,23 +159,17 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
     else:
         fig.add_shape(type="rect", x0=0, y0=0, x1=map_size, y1=map_size, line=dict(color="RoyalBlue"))
 
-    # B. PHYSICAL GRID TRACE (The Fix: Scatter Trace instead of Shapes)
-    # We construct one single continuous line for the grid. 
-    # This treats the grid as "Data" so it moves exactly with markers.
+    # B. PHYSICAL GRID TRACE (Locked to Map)
     if settings['show_grid']:
         grid_x = []
         grid_y = []
-        
-        # Vertical Lines (0 to 15)
         for i in range(16): 
             pos = i * 1000
-            grid_x.extend([pos, pos, None]) # Line from Bottom to Top, then break
+            grid_x.extend([pos, pos, None]) 
             grid_y.extend([0, map_size, None])
-            
-        # Horizontal Lines (0 to 15)
         for i in range(16): 
             pos = i * 1000
-            grid_x.extend([0, map_size, None]) # Line from Left to Right, then break
+            grid_x.extend([0, map_size, None]) 
             grid_y.extend([pos, pos, None])
 
         fig.add_trace(go.Scatter(
@@ -185,7 +180,7 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
             name='Grid'
         ))
 
-    # C. SENSOR LAYER (Invisible Heatmap)
+    # C. SENSOR LAYER
     fig.add_trace(go.Heatmap(
         z=[[0, 0], [0, 0]], x=[0, map_size], y=[0, map_size],
         opacity=0, showscale=False, hoverinfo="none", 
@@ -252,7 +247,7 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
             name="Custom", hoverinfo="text", hovertext=[m['label'] for m in custom_markers]
         ))
 
-    # H. PLAYERS (Logs)
+    # H. PLAYERS
     if not df.empty:
         raw_x = df["raw_1"]
         raw_y = df["raw_3"] if settings['use_z_as_height'] else df["raw_2"]
@@ -273,7 +268,7 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
             name="Logs"
         ))
 
-    # I. RULERS (Visual Labels Only)
+    # I. RULERS
     grid_vals_x = []
     grid_text_x = []
     for i in range(16): 
@@ -297,16 +292,14 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
         
         xaxis=dict(
             visible=True, range=[0, map_size], side="top",
-            showgrid=False, # We use the Scatter Grid Trace now
-            gridcolor="rgba(0,0,0,0)", 
+            showgrid=False, gridcolor="rgba(0,0,0,0)", 
             tickmode="array", tickvals=grid_vals_x, ticktext=grid_text_x,
             tickfont=dict(color="white", size=14, family="Arial Black"), zeroline=False
         ),
 
         yaxis=dict(
             visible=True, range=[0, map_size], side="left",
-            showgrid=False, # We use the Scatter Grid Trace now
-            gridcolor="rgba(0,0,0,0)",
+            showgrid=False, gridcolor="rgba(0,0,0,0)",
             tickmode="array", tickvals=grid_vals_y, ticktext=grid_text_y,
             tickfont=dict(color="white", size=14, family="Arial Black"),
             scaleanchor="x", scaleratio=1, zeroline=False
@@ -372,9 +365,10 @@ def main():
 
             with st.expander("🖼️ Map Image", expanded=True):
                 st.info("Align map to Target.")
-                img_off_x = st.slider("Image X", -2000, 2000, DEFAULT_CALIBRATION['img_off_x'], 10, key="cal_img_x_final_3") 
-                img_off_y = st.slider("Image Y", -2000, 2000, DEFAULT_CALIBRATION['img_off_y'], 10, key="cal_img_y_final_3") 
-                img_scale = st.slider("Image Scale", 0.8, 1.2, DEFAULT_CALIBRATION['img_scale'], 0.001, key="cal_img_scale_final_3") 
+                # 'final_6' keys to force refresh
+                img_off_x = st.slider("Image X", -2000, 2000, DEFAULT_CALIBRATION['img_off_x'], 10, key="cal_img_x_final_6") 
+                img_off_y = st.slider("Image Y", -2000, 2000, DEFAULT_CALIBRATION['img_off_y'], 10, key="cal_img_y_final_6") 
+                img_scale = st.slider("Image Scale", 0.8, 1.2, DEFAULT_CALIBRATION['img_scale'], 0.001, key="cal_img_scale_final_6") 
                 img_opacity = st.slider("Opacity", 0.1, 1.0, 1.0, 0.1)
 
             with st.expander("⚙️ Settings", expanded=False):
