@@ -8,7 +8,7 @@ from datetime import datetime
 # --- 1. CONFIGURATION & LOCKED CALIBRATION ---
 st.set_page_config(layout="wide", page_title="DayZ Intel Mapper")
 
-# 🔒 HARDCODED "WINNING" SETTINGS (No Menus, No Sliders)
+# 🔒 HARDCODED "WINNING" SETTINGS
 LOCKED_SETTINGS = {
     "img_off_x": 127,
     "img_off_y": 628,
@@ -31,18 +31,6 @@ MAP_CONFIG = {
 # --- DATABASE (Updated with User Coordinates) ---
 TOWN_DATA = {
     "Chernarus": [
-        # --- New/Updated User Entries ---
-        {"name": "Vybor", "x": 3916, "y": 8889}, # Updated
-        {"name": "Verbnik", "x": 4416, "y": 9100},
-        {"name": "Dubnik", "x": 3300, "y": 10333},
-        {"name": "Lopatino", "x": 2796, "y": 10026}, # Updated
-        {"name": "Vavilovo", "x": 2335, "y": 11097},
-        {"name": "Kalinka", "x": 2335, "y": 11097},
-        {"name": "Bashnya", "x": 2335, "y": 11097},
-        {"name": "Adamovka", "x": 5340, "y": 11380},
-        {"name": "Bogat", "x": 7056, "y": 12021},
-
-        # --- Major Cities ---
         {"name": "Chernogorsk", "x": 6600, "y": 2500},
         {"name": "Elektrozavodsk", "x": 10200, "y": 2300},
         {"name": "Berezino", "x": 12300, "y": 9500},
@@ -51,8 +39,6 @@ TOWN_DATA = {
         {"name": "Zelenogorsk", "x": 2700, "y": 5300},
         {"name": "Novaya Petrovka", "x": 3500, "y": 12400},
         {"name": "Svetlojarsk", "x": 13900, "y": 13300},
-
-        # --- Mid-Tier Towns ---
         {"name": "Balota", "x": 4600, "y": 2500},
         {"name": "Kamenka", "x": 1800, "y": 2200},
         {"name": "Komarovo", "x": 3600, "y": 2400},
@@ -64,14 +50,21 @@ TOWN_DATA = {
         {"name": "Gorka", "x": 9500, "y": 8800},
         {"name": "Novy Sobor", "x": 7100, "y": 7700},
         {"name": "Stary Sobor", "x": 6000, "y": 7700},
+        {"name": "Vybor", "x": 3916, "y": 8889}, 
+        {"name": "Verbnik", "x": 4416, "y": 9100},
+        {"name": "Dubnik", "x": 3300, "y": 10333},
+        {"name": "Lopatino", "x": 2796, "y": 10026}, 
+        {"name": "Vavilovo", "x": 2335, "y": 11097},
+        {"name": "Kalinka", "x": 2335, "y": 11097},
+        {"name": "Bashnya", "x": 2335, "y": 11097},
+        {"name": "Adamovka", "x": 5340, "y": 11380},
+        {"name": "Bogat", "x": 7056, "y": 12021},
         {"name": "Kabanino", "x": 5300, "y": 8600},
         {"name": "Grishino", "x": 5900, "y": 10300},
         {"name": "Krasnostav", "x": 11100, "y": 12300},
         {"name": "Solnichniy", "x": 13300, "y": 6200},
         {"name": "Nizhnoye", "x": 13000, "y": 8200},
         {"name": "Kamyshovo", "x": 12000, "y": 3500},
-
-        # --- Villages & Small Settlements ---
         {"name": "Berezhki", "x": 13500, "y": 14500},
         {"name": "Black Lake", "x": 13300, "y": 11500},
         {"name": "Bor", "x": 3300, "y": 3900},
@@ -103,31 +96,24 @@ TOWN_DATA = {
         {"name": "Vyshnoye", "x": 6600, "y": 6100},
         {"name": "Vysotovo", "x": 6000, "y": 2700}
     ],
-    "Livonia": [
-        {"name": "Topolin", "x": 6200, "y": 11000},
-        {"name": "Brena", "x": 6300, "y": 11800},
-        {"name": "Nadbor", "x": 5600, "y": 4500},
-        {"name": "Sitnik", "x": 6300, "y": 2200},
-        {"name": "Radunin", "x": 9500, "y": 6800}
-    ],
+    "Livonia": [],
     "Sakhal": []
 }
 
 DEFAULT_POI_DATABASE = {
     "Chernarus": {
-        # --- Key Military & Landmarks ---
         "🛡️ Military": [
             {"name": "NWAF", "x": 4600, "y": 10400},
             {"name": "Tisy Military Base", "x": 1600, "y": 14000},
             {"name": "Troitskoe Military", "x": 7200, "y": 14600},
             {"name": "Kamensk Military", "x": 7800, "y": 12800},
             {"name": "Myshkino Tents", "x": 1000, "y": 7500},
-            {"name": "MB VMC", "x": 4497, "y": 8284}, # New User Entry
+            {"name": "MB VMC", "x": 4497, "y": 8284}, 
         ],
         "🏰 Landmarks": [
             {"name": "Green Mountain", "x": 3700, "y": 5900},
             {"name": "Altar", "x": 8100, "y": 9100},
-            {"name": "Devil's Castle", "x": 6886, "y": 11494} # Updated User Entry
+            {"name": "Devil's Castle", "x": 6886, "y": 11494}
         ]
     }
 }
@@ -234,7 +220,7 @@ def render_map(df, map_name, settings, search_term, active_layers, poi_db):
     else:
         fig.add_shape(type="rect", x0=0, y0=0, x1=map_size, y1=map_size, line=dict(color="RoyalBlue"))
 
-    # B. PHYSICAL GRID
+    # B. PHYSICAL GRID (Using ScatterGL for Speed)
     if settings['show_grid']:
         grid_x, grid_y = [], []
         for i in range(16): 
@@ -246,13 +232,14 @@ def render_map(df, map_name, settings, search_term, active_layers, poi_db):
             grid_x.extend([0, map_size, None]) 
             grid_y.extend([pos, pos, None])
 
-        fig.add_trace(go.Scatter(
+        # OPTIMIZATION: Scattergl renders thousands of lines faster
+        fig.add_trace(go.Scattergl(
             x=grid_x, y=grid_y, mode='lines',
             line=dict(color='rgba(255, 255, 255, 0.2)', width=1),
             hoverinfo='skip', name='Grid'
         ))
 
-    # C. TOWNS & POIS
+    # C. TOWNS & POIS (Using ScatterGL)
     if settings['show_towns'] and map_name in TOWN_DATA:
         t_x, t_y, t_names = [], [], []
         for town in TOWN_DATA[map_name]:
@@ -260,7 +247,7 @@ def render_map(df, map_name, settings, search_term, active_layers, poi_db):
             t_y.append(town['y'])
             t_names.append(town['name'])
         
-        fig.add_trace(go.Scatter(
+        fig.add_trace(go.Scattergl(
             x=t_x, y=t_y, mode='markers+text', text=t_names, textposition="top center",
             marker=dict(size=6, color='yellow', line=dict(width=1, color='black')),
             textfont=dict(family="Arial Black", size=14, color="black"), 
@@ -273,24 +260,25 @@ def render_map(df, map_name, settings, search_term, active_layers, poi_db):
             if layer_name in active_layers:
                 l_x, l_y, l_txt = [], [], []
                 for loc in locations:
-                    tx, ty = transform_coords(loc['x'], loc['y'], settings)
-                    l_x.append(tx); l_y.append(ty); l_txt.append(loc['name'])
+                    l_x.append(loc['x'])
+                    l_y.append(loc['y'])
+                    l_txt.append(loc['name'])
                 
                 color = "cyan"
                 if "Military" in layer_name: color = "red"
                 elif "Castle" in layer_name: color = "purple"
                 
-                fig.add_trace(go.Scatter(
+                fig.add_trace(go.Scattergl(
                     x=l_x, y=l_y, mode='markers',
                     marker=dict(size=9, color=color, symbol='diamond', line=dict(width=1, color='black')),
                     text=l_txt, name=layer_name, 
                     hovertemplate="<b>%{text}</b><br>Game: %{x:.0f} / %{y:.0f}<extra></extra>"
                 ))
 
-    # D. PLAYERS (LOGS)
+    # D. PLAYERS (LOGS) - Using ScatterGL for High Performance
     if not df.empty:
         raw_x = df["raw_1"]
-        raw_y = df["raw_2"] # LOCKED to Format <X, Y, Z>
+        raw_y = df["raw_2"] 
         
         fx = raw_x + settings['log_off_x']
         fy = raw_y + settings['log_off_y']
@@ -307,7 +295,7 @@ def render_map(df, map_name, settings, search_term, active_layers, poi_db):
                 adm_x = df_plot["raw_1"]
                 adm_y = p_y
                 
-                fig.add_trace(go.Scatter(
+                fig.add_trace(go.Scattergl(
                     x=p_fx, y=p_fy, mode='text',
                     text=df_plot["icon"],
                     textfont=dict(size=14),
@@ -316,7 +304,7 @@ def render_map(df, map_name, settings, search_term, active_layers, poi_db):
                     name="Logs"
                 ))
         else:
-            fig.add_trace(go.Scatter(
+            fig.add_trace(go.Scattergl(
                 x=fx, y=fy, mode='text',
                 text=df["icon"],
                 textfont=dict(size=14),
@@ -333,7 +321,7 @@ def render_map(df, map_name, settings, search_term, active_layers, poi_db):
     for i in range(16): 
         grid_vals_y.append(i * 1000); grid_text_y.append(f"{15-i:02d}")
 
-    # F. LAYOUT (Optimized margins & Click disabled)
+    # F. LAYOUT (Optimized)
     fig.update_layout(
         height=900,
         margin={"l": 40, "r": 40, "t": 80, "b": 40}, 
@@ -397,8 +385,11 @@ def main():
                 min_t, max_t = valid_times['time_obj'].min(), valid_times['time_obj'].max()
                 if min_t != max_t:
                     try:
-                        start_time, end_time = st.slider("Window", value=(min_t, max_t), format="MM-DD HH:mm")
-                        df = df[(df['time_obj'] >= start_time) & (df['time_obj'] <= end_time)]
+                        # Use a Form to prevent slider lag
+                        with st.form("time_form"):
+                            start_time, end_time = st.slider("Window", value=(min_t, max_t), format="MM-DD HH:mm")
+                            if st.form_submit_button("Update Time"):
+                                df = df[(df['time_obj'] >= start_time) & (df['time_obj'] <= end_time)]
                     except: pass
 
         st.markdown("---")
