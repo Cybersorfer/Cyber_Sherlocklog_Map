@@ -80,7 +80,6 @@ def parse_log_file_content(content_bytes):
     logs = []
     content = content_bytes.decode("utf-8", errors='ignore')
     lines = content.split('\n')
-    # Regex to grab the 3 numbers inside <...>
     coord_pattern = re.compile(r"<([0-9\.-]+),\s*([0-9\.-]+),\s*([0-9\.-]+)>")
     name_pattern = re.compile(r'(?:Player|Identity)\s+"([^"]+)"')
     time_pattern = re.compile(r'^(\d{2}:\d{2}:\d{2})')
@@ -100,9 +99,9 @@ def parse_log_file_content(content_bytes):
             
             logs.append({
                 "time_obj": log_time, "name": name,
-                "raw_1": float(v1), # X
-                "raw_2": float(v2), # Usually Height (Z in math)
-                "raw_3": float(v3), # Usually North (Y in math)
+                "raw_1": float(v1), # First number
+                "raw_2": float(v2), # Second number (Your Y)
+                "raw_3": float(v3), # Third number (Your Z/Height)
                 "activity": line.strip()[:150] 
             })
     return pd.DataFrame(logs)
@@ -246,12 +245,15 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
             name="Custom", hoverinfo="text", hovertext=[m['label'] for m in custom_markers]
         ))
 
-    # H. PLAYERS (LOGIC FIX: Default to Col 3 for Y)
+    # H. PLAYERS (LOGS)
     if not df.empty:
         raw_x = df["raw_1"]
-        # FIX: The checkbox now toggles between Col 3 (Default/Correct) and Col 2 (Wrong/Height)
-        # If 'use_col_3_as_y' is True, we use raw_3.
-        raw_y = df["raw_3"] if settings['use_col_3_as_y'] else df["raw_2"]
+        # LOGIC FIX: Your logs are <X, Y, Z>. So we default to raw_2.
+        if settings['log_format'] == "Format: <X, Y, Z>":
+            raw_y = df["raw_2"] # Correct for your server
+        else:
+            raw_y = df["raw_3"] # Standard Vanilla (<X, Height, Y>)
+            
         fx, fy = transform_coords(raw_x, raw_y, settings)
         
         colors = ['red'] * len(df)
@@ -366,14 +368,19 @@ def main():
 
             with st.expander("🖼️ Map Image", expanded=True):
                 st.info("Align map to Target.")
-                img_off_x = st.slider("Image X", -2000, 2000, DEFAULT_CALIBRATION['img_off_x'], 10, key="cal_img_x_final_9") 
-                img_off_y = st.slider("Image Y", -2000, 2000, DEFAULT_CALIBRATION['img_off_y'], 10, key="cal_img_y_final_9") 
-                img_scale = st.slider("Image Scale", 0.8, 1.2, DEFAULT_CALIBRATION['img_scale'], 0.001, key="cal_img_scale_final_9") 
+                img_off_x = st.slider("Image X", -2000, 2000, DEFAULT_CALIBRATION['img_off_x'], 10, key="cal_img_x_final_11") 
+                img_off_y = st.slider("Image Y", -2000, 2000, DEFAULT_CALIBRATION['img_off_y'], 10, key="cal_img_y_final_11") 
+                img_scale = st.slider("Image Scale", 0.8, 1.2, DEFAULT_CALIBRATION['img_scale'], 0.001, key="cal_img_scale_final_11") 
                 img_opacity = st.slider("Opacity", 0.1, 1.0, 1.0, 0.1)
 
-            with st.expander("⚙️ Settings", expanded=False):
-                # RENAMED and DEFAULTED TO TRUE for correct behavior
-                use_col_3_as_y = st.checkbox("Use 3rd Value as North/South (Default)", True, help="Uncheck if dots are stuck at bottom.")
+            with st.expander("⚙️ Settings", expanded=True):
+                # UPDATED LOGIC SELECTOR (Defaults to what you need)
+                log_format = st.radio(
+                    "📂 Log Format",
+                    ["Format: <X, Y, Z>", "Format: <X, Height, Y>"],
+                    index=0, # Defaults to the first option (X, Y, Z)
+                    help="Switch this if dots appear at the bottom edge."
+                )
                 swap_xy = st.checkbox("Swap X/Y Inputs", False)
                 show_grid = st.checkbox("Show Grid (0-15)", True)
                 show_towns = st.checkbox("Show Towns", True)
@@ -382,7 +389,7 @@ def main():
             
         settings = {
             "img_off_x": img_off_x, "img_off_y": img_off_y, "img_scale": img_scale, "img_opacity": img_opacity,
-            "use_col_3_as_y": use_col_3_as_y, "swap_xy": swap_xy, 
+            "log_format": log_format, "swap_xy": swap_xy, 
             "click_mode": click_mode, "show_grid": show_grid, "show_towns": show_towns
         }
         
