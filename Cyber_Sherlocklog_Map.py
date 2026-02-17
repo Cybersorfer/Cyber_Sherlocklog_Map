@@ -8,13 +8,15 @@ from datetime import datetime
 # --- 1. CONFIGURATION & SAVED CALIBRATION ---
 st.set_page_config(layout="wide", page_title="DayZ Intel Mapper")
 
-# ⚠️ FINAL CALIBRATION (Matches iZurvive)
+# ⚠️ FINAL CALIBRATION (Map Image Alignment)
 DEFAULT_CALIBRATION = {
     "img_off_x": 127,   
     "img_off_y": 628,   
     "img_scale": 1.04,  
     "target_x": 7464,   
-    "target_y": 7682    
+    "target_y": 7682,
+    "log_off_x": 0,     # New: Default Log Offset X
+    "log_off_y": 0      # New: Default Log Offset Y
 }
 
 MAP_CONFIG = {
@@ -99,9 +101,7 @@ def parse_log_file_content(content_bytes):
             
             logs.append({
                 "time_obj": log_time, "name": name,
-                "raw_1": float(v1), # First number
-                "raw_2": float(v2), # Second number (Your Y)
-                "raw_3": float(v3), # Third number (Your Z/Height)
+                "raw_1": float(v1), "raw_2": float(v2), "raw_3": float(v3),
                 "activity": line.strip()[:150] 
             })
     return pd.DataFrame(logs)
@@ -123,6 +123,9 @@ def parse_poi_csv(uploaded_csv):
 
 # --- 3. COORDINATE MATH ---
 def transform_coords(game_x, game_y, settings):
+    # Apply Log Offsets (Only affects logs, handled in render loop usually, but applied here for simplicity if passed)
+    # Note: We apply log offsets in the RENDER loop to avoid messing up markers.
+    
     final_x = game_y if settings['swap_xy'] else game_x
     final_y = game_x if settings['swap_xy'] else game_y
     return final_x, final_y
@@ -159,10 +162,9 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
     else:
         fig.add_shape(type="rect", x0=0, y0=0, x1=map_size, y1=map_size, line=dict(color="RoyalBlue"))
 
-    # B. PHYSICAL GRID TRACE (Locked to Map)
+    # B. PHYSICAL GRID TRACE
     if settings['show_grid']:
-        grid_x = []
-        grid_y = []
+        grid_x, grid_y = [], []
         for i in range(16): 
             pos = i * 1000
             grid_x.extend([pos, pos, None]) 
@@ -245,16 +247,19 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
             name="Custom", hoverinfo="text", hovertext=[m['label'] for m in custom_markers]
         ))
 
-    # H. PLAYERS (LOGS)
+    # H. PLAYERS (LOGS) + LOG OFFSETS
     if not df.empty:
         raw_x = df["raw_1"]
-        # LOGIC FIX: Your logs are <X, Y, Z>. So we default to raw_2.
         if settings['log_format'] == "Format: <X, Y, Z>":
-            raw_y = df["raw_2"] # Correct for your server
+            raw_y = df["raw_2"] 
         else:
-            raw_y = df["raw_3"] # Standard Vanilla (<X, Height, Y>)
+            raw_y = df["raw_3"] 
             
         fx, fy = transform_coords(raw_x, raw_y, settings)
+        
+        # APPLY LOG OFFSET (This shifts ONLY the logs)
+        fx = fx + settings['log_off_x']
+        fy = fy + settings['log_off_y']
         
         colors = ['red'] * len(df)
         sizes = [7] * len(df)
@@ -368,19 +373,23 @@ def main():
 
             with st.expander("🖼️ Map Image", expanded=True):
                 st.info("Align map to Target.")
-                img_off_x = st.slider("Image X", -2000, 2000, DEFAULT_CALIBRATION['img_off_x'], 10, key="cal_img_x_final_11") 
-                img_off_y = st.slider("Image Y", -2000, 2000, DEFAULT_CALIBRATION['img_off_y'], 10, key="cal_img_y_final_11") 
-                img_scale = st.slider("Image Scale", 0.8, 1.2, DEFAULT_CALIBRATION['img_scale'], 0.001, key="cal_img_scale_final_11") 
+                img_off_x = st.slider("Image X", -2000, 2000, DEFAULT_CALIBRATION['img_off_x'], 10, key="cal_img_x_final_12") 
+                img_off_y = st.slider("Image Y", -2000, 2000, DEFAULT_CALIBRATION['img_off_y'], 10, key="cal_img_y_final_12") 
+                img_scale = st.slider("Image Scale", 0.8, 1.2, DEFAULT_CALIBRATION['img_scale'], 0.001, key="cal_img_scale_final_12") 
                 img_opacity = st.slider("Opacity", 0.1, 1.0, 1.0, 0.1)
 
-            with st.expander("⚙️ Settings", expanded=True):
-                # UPDATED LOGIC SELECTOR (Defaults to what you need)
+            with st.expander("⚙️ Settings (Log Tuning)", expanded=True):
                 log_format = st.radio(
                     "📂 Log Format",
                     ["Format: <X, Y, Z>", "Format: <X, Height, Y>"],
-                    index=0, # Defaults to the first option (X, Y, Z)
+                    index=0,
                     help="Switch this if dots appear at the bottom edge."
                 )
+                # NEW: LOG OFFSETS
+                st.write("📍 **Log Alignment (Fine Tune)**")
+                log_off_x = st.slider("Log X Offset", -1000, 1000, DEFAULT_CALIBRATION['log_off_x'], 10, key="cal_log_x")
+                log_off_y = st.slider("Log Y Offset", -1000, 1000, DEFAULT_CALIBRATION['log_off_y'], 10, key="cal_log_y")
+                
                 swap_xy = st.checkbox("Swap X/Y Inputs", False)
                 show_grid = st.checkbox("Show Grid (0-15)", True)
                 show_towns = st.checkbox("Show Towns", True)
@@ -390,6 +399,7 @@ def main():
         settings = {
             "img_off_x": img_off_x, "img_off_y": img_off_y, "img_scale": img_scale, "img_opacity": img_opacity,
             "log_format": log_format, "swap_xy": swap_xy, 
+            "log_off_x": log_off_x, "log_off_y": log_off_y, # Pass offsets to render
             "click_mode": click_mode, "show_grid": show_grid, "show_towns": show_towns
         }
         
