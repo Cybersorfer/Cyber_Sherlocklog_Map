@@ -28,9 +28,20 @@ MAP_CONFIG = {
     "Sakhal": {"size": 8192, "image": "map_sakhal.png"}
 }
 
-# --- DATABASE (Updated from User Screenshots) ---
+# --- DATABASE (Updated with User Coordinates) ---
 TOWN_DATA = {
     "Chernarus": [
+        # --- New/Updated User Entries ---
+        {"name": "Vybor", "x": 3916, "y": 8889}, # Updated
+        {"name": "Verbnik", "x": 4416, "y": 9100},
+        {"name": "Dubnik", "x": 3300, "y": 10333},
+        {"name": "Lopatino", "x": 2796, "y": 10026}, # Updated
+        {"name": "Vavilovo", "x": 2335, "y": 11097},
+        {"name": "Kalinka", "x": 2335, "y": 11097},
+        {"name": "Bashnya", "x": 2335, "y": 11097},
+        {"name": "Adamovka", "x": 5340, "y": 11380},
+        {"name": "Bogat", "x": 7056, "y": 12021},
+
         # --- Major Cities ---
         {"name": "Chernogorsk", "x": 6600, "y": 2500},
         {"name": "Elektrozavodsk", "x": 10200, "y": 2300},
@@ -53,7 +64,6 @@ TOWN_DATA = {
         {"name": "Gorka", "x": 9500, "y": 8800},
         {"name": "Novy Sobor", "x": 7100, "y": 7700},
         {"name": "Stary Sobor", "x": 6000, "y": 7700},
-        {"name": "Vybor", "x": 3800, "y": 8900},
         {"name": "Kabanino", "x": 5300, "y": 8600},
         {"name": "Grishino", "x": 5900, "y": 10300},
         {"name": "Krasnostav", "x": 11100, "y": 12300},
@@ -71,7 +81,6 @@ TOWN_DATA = {
         {"name": "Guglovo", "x": 8500, "y": 6600},
         {"name": "Gvozdno", "x": 8600, "y": 11900},
         {"name": "Khelm", "x": 12300, "y": 10800},
-        {"name": "Lopatino", "x": 2700, "y": 9700},
         {"name": "Msta", "x": 11200, "y": 5400},
         {"name": "Myshkino", "x": 2000, "y": 8000},
         {"name": "Olsha", "x": 13300, "y": 12800},
@@ -112,12 +121,13 @@ DEFAULT_POI_DATABASE = {
             {"name": "Tisy Military Base", "x": 1600, "y": 14000},
             {"name": "Troitskoe Military", "x": 7200, "y": 14600},
             {"name": "Kamensk Military", "x": 7800, "y": 12800},
-            {"name": "Myshkino Tents", "x": 1000, "y": 7500}
+            {"name": "Myshkino Tents", "x": 1000, "y": 7500},
+            {"name": "MB VMC", "x": 4497, "y": 8284}, # New User Entry
         ],
         "🏰 Landmarks": [
             {"name": "Green Mountain", "x": 3700, "y": 5900},
             {"name": "Altar", "x": 8100, "y": 9100},
-            {"name": "Devil's Castle", "x": 6800, "y": 11500}
+            {"name": "Devil's Castle", "x": 6886, "y": 11494} # Updated User Entry
         ]
     }
 }
@@ -263,9 +273,8 @@ def render_map(df, map_name, settings, search_term, active_layers, poi_db):
             if layer_name in active_layers:
                 l_x, l_y, l_txt = [], [], []
                 for loc in locations:
-                    l_x.append(loc['x'])
-                    l_y.append(loc['y'])
-                    l_txt.append(loc['name'])
+                    tx, ty = transform_coords(loc['x'], loc['y'], settings)
+                    l_x.append(tx); l_y.append(ty); l_txt.append(loc['name'])
                 
                 color = "cyan"
                 if "Military" in layer_name: color = "red"
@@ -281,10 +290,8 @@ def render_map(df, map_name, settings, search_term, active_layers, poi_db):
     # D. PLAYERS (LOGS)
     if not df.empty:
         raw_x = df["raw_1"]
-        # Use our locked logic preference <X, Y, Z>
-        raw_y = df["raw_2"] 
+        raw_y = df["raw_2"] # LOCKED to Format <X, Y, Z>
         
-        # Apply Locked Log Offset
         fx = raw_x + settings['log_off_x']
         fy = raw_y + settings['log_off_y']
         
@@ -297,9 +304,8 @@ def render_map(df, map_name, settings, search_term, active_layers, poi_db):
                 p_fx = p_x + settings['log_off_x']
                 p_fy = p_y + settings['log_off_y']
                 
-                # ADM Display: Raw values from log (X and Y)
                 adm_x = df_plot["raw_1"]
-                adm_y = df_plot["raw_2"]
+                adm_y = p_y
                 
                 fig.add_trace(go.Scatter(
                     x=p_fx, y=p_fy, mode='text',
@@ -310,15 +316,11 @@ def render_map(df, map_name, settings, search_term, active_layers, poi_db):
                     name="Logs"
                 ))
         else:
-            # ADM Display: Raw values from log (X and Y)
-            adm_display_x = df["raw_1"]
-            adm_display_y = df["raw_2"]
-            
             fig.add_trace(go.Scatter(
                 x=fx, y=fy, mode='text',
                 text=df["icon"],
                 textfont=dict(size=14),
-                customdata=list(zip(df["time_str"], df["name"], adm_display_x, adm_display_y)),
+                customdata=list(zip(df["time_str"], df["name"], raw_x, raw_y)),
                 hovertemplate="<b>%{customdata[0]}</b><br>Player: %{customdata[1]}<br>ADM: %{customdata[2]:.1f} / %{customdata[3]:.1f}<extra></extra>",
                 name="Logs"
             ))
@@ -409,10 +411,8 @@ def main():
     with col1: 
         st.subheader(f"📍 {selected_map}")
     
-    # Render with HARDCODED LOCKED settings
     fig, map_size = render_map(df, selected_map, LOCKED_SETTINGS, search_term, active_layers, current_db)
 
-    # PURE VIEWER MODE
     st.plotly_chart(
         fig, 
         use_container_width=True,
