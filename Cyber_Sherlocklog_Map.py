@@ -8,7 +8,7 @@ from datetime import datetime
 # --- 1. CONFIGURATION & SAVED CALIBRATION ---
 st.set_page_config(layout="wide", page_title="DayZ Intel Mapper")
 
-# ⚠️ FINAL CALIBRATION (Matches iZurvive)
+# ⚠️ FINAL CALIBRATION
 DEFAULT_CALIBRATION = {
     "img_off_x": 127,   
     "img_off_y": 628,   
@@ -83,12 +83,11 @@ def parse_log_file_content(content_bytes):
     content = content_bytes.decode("utf-8", errors='ignore')
     lines = content.split('\n')
     
-    # Regex for coordinates
     coord_pattern = re.compile(r"<([0-9\.-]+),\s*([0-9\.-]+),\s*([0-9\.-]+)>")
-    # Regex for Player Name
     name_pattern = re.compile(r'(?:Player|Identity)\s+"([^"]+)"')
-    # Regex for Time (Matches "12:00:00" or "2025-01-01 12:00:00")
-    # We look for the first occurrence of HH:MM:SS
+    # Regex to capture Date + Time (YYYY-MM-DD HH:MM:SS)
+    datetime_pattern = re.compile(r'(\d{4}-\d{2}-\d{2}\s\d{2}:\d{2}:\d{2})')
+    # Fallback to just time if date is missing
     time_pattern = re.compile(r'(\d{2}:\d{2}:\d{2})')
 
     for line in lines:
@@ -96,24 +95,42 @@ def parse_log_file_content(content_bytes):
         if coord_match:
             v1, v2, v3 = coord_match.groups()
             name_match = name_pattern.search(line)
-            time_match = time_pattern.search(line)
             
+            # --- DATE PARSING ---
+            dt_match = datetime_pattern.search(line)
+            t_match = time_pattern.search(line)
+            
+            # Prefer full date, fallback to time, else unknown
+            if dt_match:
+                time_str = dt_match.group(1)
+                try:
+                    log_time = datetime.strptime(time_str, "%Y-%m-%d %H:%M:%S")
+                except:
+                    log_time = None
+            elif t_match:
+                time_str = t_match.group(1)
+                try:
+                    log_time = datetime.strptime(time_str, "%H:%M:%S") # Dummy date
+                except:
+                    log_time = None
+            else:
+                time_str = "Unknown Time"
+                log_time = None
+
             name = name_match.group(1) if name_match else "Unknown"
             
-            # Store the simple string "17:43:45" for display
-            time_str = time_match.group(1) if time_match else "??:??:??"
-            
-            # Also try to create a real datetime object for sorting/filtering
-            log_time = None
-            if time_match:
-                try:
-                    log_time = datetime.strptime(time_str, "%H:%M:%S").time()
-                except: pass
+            # --- HIT DETECTION ---
+            # Identify if this is a combat event
+            content_lower = line.lower()
+            is_hit = any(x in content_lower for x in ['hit', 'damage', 'shot', 'killed', 'unconscious'])
+            icon = "💥" if is_hit else "👤" # Hit vs Player Icon
             
             logs.append({
                 "time_obj": log_time,
-                "time_str": time_str, # Used for tooltip
+                "time_str": time_str,
                 "name": name,
+                "icon": icon, # Stored for plotting
+                "type": "Hit" if is_hit else "Move",
                 "raw_1": float(v1),
                 "raw_2": float(v2),
                 "raw_3": float(v3)
@@ -259,13 +276,18 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
             name="Custom", hoverinfo="text", hovertext=[m['label'] for m in custom_markers]
         ))
 
-    # H. PLAYERS (LOGS) - CLEAN TOOLTIP
+    # H. PLAYERS & EVENTS (ICONS & ADM COORDS)
     if not df.empty:
         raw_x = df["raw_1"]
+        # Determine Logic
         if settings['log_format'] == "Format: <X, Y, Z>":
-            raw_y = df["raw_2"] 
+            raw_y = df["raw_2"] # Y is 2nd value
+            adm_display_x = df["raw_1"]
+            adm_display_y = df["raw_2"]
         else:
-            raw_y = df["raw_3"] 
+            raw_y = df["raw_3"] # Y is 3rd value
+            adm_display_x = df["raw_1"]
+            adm_display_y = df["raw_3"]
             
         fx, fy = transform_coords(raw_x, raw_y, settings)
         
@@ -273,22 +295,56 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
         fx = fx + settings['log_off_x']
         fy = fy + settings['log_off_y']
         
-        colors = ['red'] * len(df)
-        sizes = [7] * len(df)
         if search_term:
-            mask = df['name'].str.contains(search_term, case=False, na=False)
-            colors = ['lime' if m else 'rgba(255,0,0,0.1)' for m in mask]
-            sizes = [15 if m else 5 for m in mask]
-
-        fig.add_trace(go.Scatter(
-            x=fx, y=fy, mode='markers',
-            marker=dict(size=sizes, color=colors, line=dict(width=1, color='white')),
-            text=df["name"], 
-            customdata=df["time_str"], # Pass the simple time string
-            # CLEAN TOOLTIP FORMAT:
-            hovertemplate="<b>%{customdata}</b><br>Player %{text}<br>Game: %{x:.0f} / %{y:.0f}<extra></extra>",
-            name="Logs"
-        ))
+            # Simple filter for search
+            df['filtered'] = df['name'].str.contains(search_term, case=False, na=False)
+            df_plot = df[df['filtered']].copy()
+            # If empty after search, don't crash
+            if df_plot.empty:
+                df_plot = df.head(0)
+            
+            # Sync coordinate arrays to filtered df
+            # We need to re-calc coords for just the filtered rows to match index
+            # Or simpler: Just re-calculate everything for the filtered subset
+            # Let's do the latter to avoid index mismatch
+            if not df_plot.empty:
+                p_x = df_plot["raw_1"]
+                p_y = df_plot["raw_2"] if settings['log_format'] == "Format: <X, Y, Z>" else df_plot["raw_3"]
+                p_fx, p_fy = transform_coords(p_x, p_y, settings)
+                p_fx = p_fx + settings['log_off_x']
+                p_fy = p_fy + settings['log_off_y']
+                
+                # Update display vars
+                adm_x = df_plot["raw_1"]
+                adm_y = p_y
+                
+                # Plot
+                fig.add_trace(go.Scatter(
+                    x=p_fx, y=p_fy, mode='text',
+                    text=df_plot["icon"], # 👤 or 💥
+                    textfont=dict(size=14), # Mini Icon Size
+                    customdata=list(zip(df_plot["time_str"], df_plot["name"], adm_x, adm_y)),
+                    hovertemplate=(
+                        "<b>%{customdata[0]}</b><br>" + # Time/Date
+                        "Player: %{customdata[1]}<br>" + # Name
+                        "ADM: %{customdata[2]:.1f} / %{customdata[3]:.1f}<extra></extra>" # Raw X/Y
+                    ),
+                    name="Logs"
+                ))
+        else:
+            # No Search: Plot All
+            fig.add_trace(go.Scatter(
+                x=fx, y=fy, mode='text',
+                text=df["icon"], # 👤 or 💥
+                textfont=dict(size=14), # Mini Icon Size
+                customdata=list(zip(df["time_str"], df["name"], adm_display_x, adm_display_y)),
+                hovertemplate=(
+                    "<b>%{customdata[0]}</b><br>" + 
+                    "Player: %{customdata[1]}<br>" + 
+                    "ADM: %{customdata[2]:.1f} / %{customdata[3]:.1f}<extra></extra>"
+                ),
+                name="Logs"
+            ))
 
     # I. RULERS
     grid_vals_x = []
@@ -359,14 +415,22 @@ def main():
         df = parse_log_file_content(uploaded_log.getvalue()) if uploaded_log else pd.DataFrame()
 
         if not df.empty and 'time_obj' in df.columns:
+            # Convert time_obj column for slider (handling NaTs)
             valid_times = df.dropna(subset=['time_obj'])
             if not valid_times.empty:
                 st.markdown("---")
                 st.subheader("⏳ Time")
+                # We need purely time or datetime. Let's assume day is same or ignore day for slider.
+                # Simplification: Just slide by index or strings? No, time slider.
+                # If we have full dates, the slider should be datetime.
                 min_t, max_t = valid_times['time_obj'].min(), valid_times['time_obj'].max()
                 if min_t != max_t:
-                    start_time, end_time = st.slider("Window", value=(min_t, max_t), format="HH:mm:ss")
-                    df = df[(df['time_obj'] >= start_time) & (df['time_obj'] <= end_time)]
+                    # Streamlit slider supports datetime if types match
+                    try:
+                        start_time, end_time = st.slider("Window", value=(min_t, max_t), format="MM-DD HH:mm")
+                        df = df[(df['time_obj'] >= start_time) & (df['time_obj'] <= end_time)]
+                    except:
+                        st.warning("Logs span multiple types, time slider disabled.")
 
         st.markdown("---")
         available_layers = current_db.get(selected_map, {}).keys()
@@ -387,9 +451,9 @@ def main():
 
             with st.expander("🖼️ Map Image", expanded=True):
                 st.info("Align map to Target.")
-                img_off_x = st.slider("Image X", -2000, 2000, DEFAULT_CALIBRATION['img_off_x'], 10, key="cal_img_x_final_13") 
-                img_off_y = st.slider("Image Y", -2000, 2000, DEFAULT_CALIBRATION['img_off_y'], 10, key="cal_img_y_final_13") 
-                img_scale = st.slider("Image Scale", 0.8, 1.2, DEFAULT_CALIBRATION['img_scale'], 0.001, key="cal_img_scale_final_13") 
+                img_off_x = st.slider("Image X", -2000, 2000, DEFAULT_CALIBRATION['img_off_x'], 10, key="cal_img_x_final_14") 
+                img_off_y = st.slider("Image Y", -2000, 2000, DEFAULT_CALIBRATION['img_off_y'], 10, key="cal_img_y_final_14") 
+                img_scale = st.slider("Image Scale", 0.8, 1.2, DEFAULT_CALIBRATION['img_scale'], 0.001, key="cal_img_scale_final_14") 
                 img_opacity = st.slider("Opacity", 0.1, 1.0, 1.0, 0.1)
 
             with st.expander("⚙️ Settings (Log Tuning)", expanded=True):
@@ -400,8 +464,8 @@ def main():
                     help="Switch this if dots appear at the bottom edge."
                 )
                 st.write("📍 **Log Alignment (Fine Tune)**")
-                log_off_x = st.slider("Log X Offset", -1000, 1000, DEFAULT_CALIBRATION['log_off_x'], 10, key="cal_log_x_13")
-                log_off_y = st.slider("Log Y Offset", -1000, 1000, DEFAULT_CALIBRATION['log_off_y'], 10, key="cal_log_y_13")
+                log_off_x = st.slider("Log X Offset", -1000, 1000, DEFAULT_CALIBRATION['log_off_x'], 10, key="cal_log_x_14")
+                log_off_y = st.slider("Log Y Offset", -1000, 1000, DEFAULT_CALIBRATION['log_off_y'], 10, key="cal_log_y_14")
                 
                 swap_xy = st.checkbox("Swap X/Y Inputs", False)
                 show_grid = st.checkbox("Show Grid (0-15)", True)
