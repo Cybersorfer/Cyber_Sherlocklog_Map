@@ -151,7 +151,7 @@ def transform_coords(game_x, game_y, settings):
     return final_x, final_y
 
 # --- 4. RENDER ENGINE ---
-def render_map(df, map_name, settings, search_term, custom_markers, active_layers, poi_db):
+def render_map(df, map_name, settings, search_term, active_layers, poi_db):
     config = MAP_CONFIG[map_name]
     map_size = config["size"]
     fig = go.Figure()
@@ -290,10 +290,10 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
     # F. LAYOUT (Optimized margins & Click disabled)
     fig.update_layout(
         height=900,
-        # Increased Top Margin (t=60) to prevent modebar overlap
-        margin={"l": 40, "r": 40, "t": 60, "b": 40}, 
+        # Increased Top Margin to 80px to push toolbar away from grid
+        margin={"l": 40, "r": 40, "t": 80, "b": 40}, 
         plot_bgcolor="#0e1117", paper_bgcolor="#0e1117",
-        dragmode="pan", # Only Pan is allowed
+        dragmode="pan", 
         hovermode="closest", showlegend=True,
         legend=dict(yanchor="top", y=0.95, xanchor="right", x=0.99, bgcolor="rgba(0,0,0,0.6)", font=dict(color="white")),
         
@@ -322,13 +322,25 @@ def main():
         .stApp { background-color: #0e1117; color: #fafafa; }
         [data-testid="stSidebar"] { background-color: #262730; }
         [data-testid="stSidebar"] * { color: #cccccc !important; }
-        /* Remove white header space */
-        header[data-testid="stHeader"] { visibility: hidden; }
-        /* Reduce top padding significantly */
-        .block-container { padding-top: 1rem !important; }
-        /* Hide "Manage App" button if possible */
-        #MainMenu { visibility: hidden; }
-        footer { visibility: hidden; }
+        
+        /* FORCE HIDE HEADER */
+        header[data-testid="stHeader"] { 
+            visibility: hidden !important; 
+            height: 0px !important; 
+        }
+        
+        /* Remove top padding caused by hidden header */
+        .block-container { 
+            padding-top: 0rem !important; 
+            padding-bottom: 1rem !important;
+        }
+        
+        /* Hide Main Menu (Hamburger) and Footer */
+        #MainMenu { visibility: hidden !important; }
+        footer { visibility: hidden !important; }
+        
+        /* Hide Decoration bar */
+        [data-testid="stDecoration"] { visibility: hidden !important; height: 0px !important; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -339,8 +351,7 @@ def main():
         st.write("---")
         uploaded_log = st.file_uploader("1. Upload Logs", type=['adm', 'rpt', 'log'])
         
-        # User requested explanation of POI DB
-        st.info("ℹ️ **Upload POI DB**: Optional. Upload a CSV to show permanent markers (Trader zones, Bases, etc).")
+        st.caption("ℹ️ **Upload POI DB**: Optional. CSV file for permanent markers like Bases or Trader Zones.")
         uploaded_csv = st.file_uploader("2. Upload POI DB", type=['csv'])
         
         if uploaded_csv:
@@ -369,16 +380,14 @@ def main():
         
         search_term = st.text_input("Search", placeholder="Player...")
         
-        # Settings are now LOCKED and hidden from UI, but applied in logic
-        
-    col1, col2 = st.columns([0.95, 0.05]) # maximized width
+    col1, col2 = st.columns([0.95, 0.05])
     with col1: 
         st.subheader(f"📍 {selected_map}")
     
     # Render with LOCKED settings
-    fig, map_size = render_map(df, selected_map, LOCKED_SETTINGS, search_term, [], active_layers, current_db)
+    fig, map_size = render_map(df, selected_map, LOCKED_SETTINGS, search_term, active_layers, current_db)
 
-    # Display Chart (Interactions Disabled)
+    # Display Chart (Interactions DISABLED - No "on_select" or "selection_mode")
     st.plotly_chart(
         fig, 
         use_container_width=True,
@@ -386,7 +395,7 @@ def main():
             'scrollZoom': True, 
             'displayModeBar': True, 
             'displaylogo': False,
-            # This disables the "Selection" tool which causes reloads
+            # Remove tools that cause reloads
             'modeBarButtonsToRemove': ['select2d', 'lasso2d', 'autoScale2d']
         }
     )
