@@ -8,17 +8,17 @@ from datetime import datetime
 # --- 1. CONFIGURATION & SAVED CALIBRATION ---
 st.set_page_config(layout="wide", page_title="DayZ Intel Mapper")
 
-# ⚠️ YOUR WINNING NUMBERS (These are now forced to load)
+# ⚠️ YOUR WINNING NUMBERS (Forced Load)
 DEFAULT_CALIBRATION = {
-    "img_off_x": -120,  
-    "img_off_y": -200,  
+    "img_off_x": -100,  
+    "img_off_y": -300,  
     "img_scale": 1.04,  
     "target_x": 7441,   
     "target_y": 7043    
 }
 
 MAP_CONFIG = {
-    "Chernarus": {"size": 15360, "image": "map_chernarus.png"},
+    "Chernarus": {"size": 15360, "image": "map_chernarus.png"}, # 15360 is the exact edge
     "Livonia": {"size": 12800, "image": "map_livonia.png"},
     "Sakhal": {"size": 8192, "image": "map_sakhal.png"}
 }
@@ -81,7 +81,6 @@ def parse_log_file_content(content_bytes):
     content = content_bytes.decode("utf-8", errors='ignore')
     lines = content.split('\n')
     
-    # Matches <X, Z, Y> or <X, Y, Z>
     coord_pattern = re.compile(r"<([0-9\.-]+),\s*([0-9\.-]+),\s*([0-9\.-]+)>")
     name_pattern = re.compile(r'(?:Player|Identity)\s+"([^"]+)"')
     time_pattern = re.compile(r'^(\d{2}:\d{2}:\d{2})')
@@ -144,8 +143,7 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
     map_size = config["size"]
     fig = go.Figure()
 
-    # A. SENSOR LAYER (Invisible Heatmap for Hover)
-    # Using a dummy layer just to catch hover events
+    # A. SENSOR LAYER
     fig.add_trace(go.Heatmap(
         z=[[0, 0], [0, 0]], 
         x=[0, map_size], 
@@ -153,10 +151,10 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
         opacity=0, 
         showscale=False,
         hoverinfo="none", 
-        hovertemplate="<extra></extra>" # Suppress default, we rely on layout hover
+        hovertemplate="<extra></extra>"
     ))
 
-    # B. IMAGE LAYER (Background)
+    # B. IMAGE LAYER
     img = load_map_image(config["image"])
     if img:
         img_width = map_size * settings['img_scale']
@@ -261,20 +259,23 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
             name="Logs"
         ))
 
-    # H. RULERS
-    # X Axis (00-15)
+    # H. RULERS (Visual Grid Only)
+    # 0 to 15360 -> We create ticks exactly at 0, 1000, 2000... 15000
     grid_vals_x = []
     grid_text_x = []
-    for i in range(17): 
+    
+    # We stop at 15000 so we don't draw a line at 16000 (which is off map)
+    for i in range(16): 
         grid_vals_x.append(i * 1000)
         grid_text_x.append(f"{i:02d}")
 
-    # Y Axis (15-00) - Correctly Inverted for Display
+    # For Y axis (15 -> 0)
     grid_vals_y = []
     grid_text_y = []
-    for i in range(17): 
+    for i in range(16): 
         grid_vals_y.append(i * 1000)      
-        grid_text_y.append(f"{15-i:02d}")
+        # i=0 (Bottom) -> Label 15
+        grid_text_y.append(f"{15-i:02d}") 
 
     # I. LAYOUT
     fig.update_layout(
@@ -287,14 +288,20 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
         legend=dict(yanchor="top", y=0.95, xanchor="right", x=0.99, bgcolor="rgba(0,0,0,0.6)", font=dict(color="white")),
         
         xaxis=dict(
-            visible=True, range=[-500, map_size + 500], side="top",
+            visible=True, 
+            # CLAMPED: Exact Map Edge (0 to 15360)
+            range=[0, map_size], 
+            side="top",
             showgrid=settings['show_grid'], gridcolor="rgba(255, 255, 255, 0.2)",
             tickmode="array", tickvals=grid_vals_x, ticktext=grid_text_x,
             tickfont=dict(color="white", size=14, family="Arial Black"), zeroline=False
         ),
 
         yaxis=dict(
-            visible=True, range=[-500, map_size + 500], side="left",
+            visible=True, 
+            # CLAMPED: Exact Map Edge (0 to 15360)
+            range=[0, map_size], 
+            side="left",
             showgrid=settings['show_grid'], gridcolor="rgba(255, 255, 255, 0.2)",
             tickmode="array", tickvals=grid_vals_y, ticktext=grid_text_y,
             tickfont=dict(color="white", size=14, family="Arial Black"),
@@ -361,10 +368,9 @@ def main():
 
             with st.expander("🖼️ Map Image", expanded=True):
                 st.info("Align map to Target.")
-                # I changed the 'key' parameters here to force a reset!
-                img_off_x = st.slider("Image X", -2000, 2000, DEFAULT_CALIBRATION['img_off_x'], 10, key="cal_img_x") 
-                img_off_y = st.slider("Image Y", -2000, 2000, DEFAULT_CALIBRATION['img_off_y'], 10, key="cal_img_y") 
-                img_scale = st.slider("Image Scale", 0.8, 1.2, DEFAULT_CALIBRATION['img_scale'], 0.001, key="cal_img_scale") 
+                img_off_x = st.slider("Image X", -2000, 2000, DEFAULT_CALIBRATION['img_off_x'], 10, key="cal_img_x_clean") 
+                img_off_y = st.slider("Image Y", -2000, 2000, DEFAULT_CALIBRATION['img_off_y'], 10, key="cal_img_y_clean") 
+                img_scale = st.slider("Image Scale", 0.8, 1.2, DEFAULT_CALIBRATION['img_scale'], 0.001, key="cal_img_scale_clean") 
                 img_opacity = st.slider("Opacity", 0.1, 1.0, 1.0, 0.1)
 
             with st.expander("⚙️ Settings", expanded=False):
@@ -405,11 +411,8 @@ def main():
             gx, gy = reverse_transform(p['x'], p['y'], settings)
             @st.dialog("Add Marker")
             def add_marker_dialog():
-                # Correct GPS Calculation (Standard: Value / 10000)
-                # X: 7553 -> 0.75
-                # Y: 7816 -> 0.78
                 gps_x = gx / 10000
-                gps_y = gy / 10000
+                gps_y = (map_size - gy) / 10000
                 
                 st.write(f"GPS: X: {gps_x:.2f} Y: {gps_y:.2f}")
                 st.write(f"Game: {gx:.0f} / {gy:.0f}")
@@ -423,4 +426,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
