@@ -14,7 +14,7 @@ MAP_CONFIG = {
     "Sakhal": {"size": 8192, "image": "map_sakhal.png"}
 }
 
-# --- DATABASE (Matched to Game Coordinates: 0,0 is Bottom-Left) ---
+# --- DATABASE (Standard DayZ Coordinates) ---
 TOWN_DATA = {
     "Chernarus": [
         {"name": "NWAF", "x": 4600, "z": 10200},
@@ -116,27 +116,19 @@ def parse_poi_csv(uploaded_csv):
     except Exception:
         return DEFAULT_POI_DATABASE
 
-# --- 3. MATH (STRICT GAME COORDINATES) ---
-def transform_coords(game_x, game_z, settings, map_size):
+# --- 3. COORDINATE MATH (Native Cartesian) ---
+# We no longer invert Y. We let Plotly handle (0,0) at Bottom-Left.
+def transform_coords(game_x, game_z, settings):
     """
-    Converts DayZ Game Coordinates (0,0 Bottom-Left) to Plot Coordinates (0,0 Top-Left).
+    Direct mapping. Game X -> Plot X. Game Z -> Plot Y.
     """
     final_x = game_z if settings['swap_xz'] else game_x
     final_z = game_x if settings['swap_xz'] else game_z
-    
-    # Invert Vertical (Game Z=0 is Bottom, Image Y=0 is Top)
-    # We map Game Z (0 to 15360) to Plot Y (15360 to 0)
-    plot_x = final_x
-    plot_y = map_size - final_z 
-    
-    return plot_x, plot_y
+    return final_x, final_z # Simple!
 
-def reverse_transform(plot_x, plot_y, settings, map_size):
-    """
-    Converts Plot Coordinates back to Game Coordinates.
-    """
+def reverse_transform(plot_x, plot_y, settings):
     game_x = plot_x
-    game_z = map_size - plot_y
+    game_z = plot_y
     
     if settings['swap_xz']:
         return game_z, game_x
@@ -148,18 +140,36 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
     map_size = config["size"]
     fig = go.Figure()
 
-    # A. IMAGE LAYER (Background)
+    # A. SENSOR LAYER (Invisible Heatmap for Hover Coordinates)
+    # This creates a transparent overlay so hover works everywhere
+    fig.add_trace(go.Heatmap(
+        z=[[0, 0], [0, 0]], 
+        x=[0, map_size], 
+        y=[0, map_size],
+        opacity=0, 
+        showscale=False,
+        hoverinfo="none", # We handle formatting in layout
+        hovertemplate="Game X: %{x:.0f}<br>Game Z: %{y:.0f}<extra></extra>"
+    ))
+
+    # B. IMAGE LAYER (Background)
     img = load_map_image(config["image"])
     if img:
         img_width = map_size * settings['img_scale']
         img_height = map_size * settings['img_scale']
         
+        # Calculate Image Top-Left Position
+        # In Plotly Native Cartesian (0 at bottom), the Image Top is at Y = map_size
+        # We apply user offsets to this "Top" anchor.
+        img_x = settings['img_off_x']
+        img_y = map_size + settings['img_off_y'] 
+        
         fig.add_layout_image(
             dict(
                 source=img,
                 xref="x", yref="y",
-                x=settings['img_off_x'],        
-                y=settings['img_off_y'],        
+                x=img_x,        
+                y=img_y,        
                 sizex=img_width,
                 sizey=img_height,
                 sizing="stretch",
@@ -170,48 +180,40 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
     else:
         fig.add_shape(type="rect", x0=0, y0=0, x1=map_size, y1=map_size, line=dict(color="RoyalBlue"))
 
-    # B. CALIBRATION TARGET (The Red Crosshair)
+    # C. CALIBRATION TARGET
     if cal_target['active']:
-        tx, ty = transform_coords(cal_target['x'], cal_target['z'], settings, map_size)
+        tx, ty = transform_coords(cal_target['x'], cal_target['z'], settings)
         fig.add_trace(go.Scatter(
             x=[tx], y=[ty], mode='markers+text',
             marker=dict(size=25, color='red', symbol='cross-thin', line=dict(width=3, color='red')),
             text=["🎯 TARGET"], textposition="top center",
             textfont=dict(color="red", size=16, family="Arial Black"),
+            hovertemplate="Target<br>X: %{x}<br>Z: %{y}<extra></extra>",
             name="Calibration Target"
         ))
-        
-        # Also show corners if active
-        c1x, c1y = transform_coords(0, 0, settings, map_size) # Bottom Left (Game) -> Bottom Left (Plot)
-        c2x, c2y = transform_coords(map_size, map_size, settings, map_size) # Top Right
-        
-        fig.add_trace(go.Scatter(
-            x=[c1x, c2x], y=[c1y, c2y], mode='markers',
-            marker=dict(size=15, color='red', symbol='x'),
-            name="Corners", hoverinfo='skip'
-        ))
 
-    # C. TOWNS
+    # D. TOWNS
     if settings['show_towns'] and map_name in TOWN_DATA:
         t_x, t_y, t_names = [], [], []
         for town in TOWN_DATA[map_name]:
-            tx, ty = transform_coords(town['x'], town['z'], settings, map_size)
+            tx, ty = transform_coords(town['x'], town['z'], settings)
             t_x.append(tx); t_y.append(ty); t_names.append(town['name'])
         
         fig.add_trace(go.Scatter(
             x=t_x, y=t_y, mode='markers+text', text=t_names, textposition="top center",
             marker=dict(size=6, color='yellow', line=dict(width=1, color='black')),
             textfont=dict(family="Arial Black", size=14, color="black"), 
-            hoverinfo='none', name="Towns"
+            hovertemplate="<b>%{text}</b><br>X: %{x}<br>Z: %{y}<extra></extra>",
+            name="Towns"
         ))
 
-    # D. POI LAYERS
+    # E. POI LAYERS
     if map_name in poi_db:
         for layer_name, locations in poi_db[map_name].items():
             if layer_name in active_layers:
                 l_x, l_y, l_txt = [], [], []
                 for loc in locations:
-                    tx, ty = transform_coords(loc['x'], loc['z'], settings, map_size)
+                    tx, ty = transform_coords(loc['x'], loc['z'], settings)
                     l_x.append(tx); l_y.append(ty); l_txt.append(loc['name'])
                 
                 color = "cyan"
@@ -221,14 +223,15 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
                 fig.add_trace(go.Scatter(
                     x=l_x, y=l_y, mode='markers',
                     marker=dict(size=9, color=color, symbol='diamond', line=dict(width=1, color='black')),
-                    text=l_txt, name=layer_name, hoverinfo='text'
+                    text=l_txt, name=layer_name, 
+                    hovertemplate="<b>%{text}</b><br>X: %{x}<br>Z: %{y}<extra></extra>"
                 ))
 
-    # E. CUSTOM MARKERS
+    # F. CUSTOM MARKERS
     if custom_markers:
         c_x, c_y, c_text = [], [], []
         for m in custom_markers:
-            cx, cy = transform_coords(m['x'], m['z'], settings, map_size)
+            cx, cy = transform_coords(m['x'], m['z'], settings)
             c_x.append(cx); c_y.append(cy)
             c_text.append(MARKER_ICONS.get(m['type'], "📍"))
 
@@ -237,13 +240,13 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
             name="Custom", hoverinfo="text", hovertext=[m['label'] for m in custom_markers]
         ))
 
-    # F. PLAYERS
+    # G. PLAYERS (Logs)
     if not df.empty:
         raw_x = df["raw_1"]
         # Use col 3 as Z if Ocean Fix is on (Standard <x, y, z> log format)
         raw_z = df["raw_3"] if settings['use_y_as_z'] else df["raw_2"]
         
-        fx, fz = transform_coords(raw_x, raw_z, settings, map_size)
+        fx, fz = transform_coords(raw_x, raw_z, settings)
         
         colors = ['red'] * len(df)
         sizes = [7] * len(df)
@@ -256,23 +259,24 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
             x=fx, y=fz, mode='markers',
             marker=dict(size=sizes, color=colors, line=dict(width=1, color='white')),
             text=df["name"], customdata=df["activity"],
-            hovertemplate="<b>%{text}</b><br>%{customdata}<extra></extra>",
+            hovertemplate="<b>%{text}</b><br>X: %{x}<br>Z: %{y}<br>%{customdata}<extra></extra>",
             name="Logs"
         ))
 
-    # G. RULERS (00 - 15)
+    # H. RULERS (00 - 15)
     grid_vals = []
     grid_text = []
     for i in range(17): # 0 to 16
         grid_vals.append(i * 1000)
         grid_text.append(f"{i:02d}")
 
-    # H. LAYOUT
+    # I. LAYOUT
     fig.update_layout(
         height=900,
         margin={"l": 40, "r": 40, "t": 40, "b": 40},
         plot_bgcolor="#0e1117", paper_bgcolor="#0e1117",
         dragmode="pan" if settings['click_mode'] == "Navigate" else False,
+        hovermode="closest", # Enables the tooltip everywhere
         showlegend=True,
         legend=dict(yanchor="top", y=0.95, xanchor="right", x=0.99, bgcolor="rgba(0,0,0,0.6)", font=dict(color="white")),
         
@@ -291,10 +295,11 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
             zeroline=False
         ),
 
-        # --- Y AXIS (00 - 15 North to South) ---
+        # --- Y AXIS (00 - 15 South to North) ---
         yaxis=dict(
             visible=True,
-            range=[map_size + 500, -500], # Inverted: 0 (North) at top
+            # NATIVE CARTESIAN: 16000 at top, -500 at bottom
+            range=[-500, map_size + 500], 
             side="left",
             showgrid=settings['show_grid'],
             gridcolor="rgba(255, 255, 255, 0.2)",
@@ -360,20 +365,20 @@ def main():
         st.subheader("🔧 Calibration")
 
         with st.form("calibration_form"):
-            # 1. Calibration Target (NEW)
-            with st.expander("🎯 Calibration Target (Use Center)", expanded=True):
-                st.caption("Enter known coordinates (e.g. from iZurvive) to plot a reference target.")
+            # 1. Calibration Target
+            with st.expander("🎯 Calibration Target", expanded=True):
+                st.caption("Coordinates of a known landmark (e.g. Center).")
                 show_target = st.checkbox("Show Target", value=True)
-                # Defaults set to your "Center" marker
                 target_x = st.number_input("Target X", value=7550, step=10)
                 target_z = st.number_input("Target Z (South-North)", value=7812, step=10)
 
             # 2. Map Image Calibration
             with st.expander("🖼️ Map Image (Background)", expanded=True):
-                st.info("Move the sliders until the map matches the Target 🎯.")
-                img_off_x = st.slider("Image X", -2000, 2000, -100, 10) 
-                img_off_y = st.slider("Image Y", -2000, 2000, -300, 10)
-                img_scale = st.slider("Image Scale", 0.8, 1.2, 1.05, 0.001) # Finer control
+                st.info("Move sliders until the landmark hits the Red Target.")
+                # Tweaked defaults for the new Cartesian system
+                img_off_x = st.slider("Image X", -2000, 2000, -200, 10) 
+                img_off_y = st.slider("Image Y", -2000, 2000, -100, 10) 
+                img_scale = st.slider("Image Scale", 0.8, 1.2, 1.05, 0.001) 
                 img_opacity = st.slider("Opacity", 0.1, 1.0, 1.0, 0.1)
 
             # 3. Logic Settings
@@ -398,7 +403,9 @@ def main():
             st.rerun()
 
     col1, col2 = st.columns([0.85, 0.15])
-    with col1: st.subheader(f"📍 {selected_map}")
+    with col1: 
+        st.subheader(f"📍 {selected_map}")
+        st.caption("ℹ️ Hover over the map to see coordinates.")
     
     fig, map_size = render_map(df, selected_map, settings, search_term, st.session_state['custom_markers'], active_layers, current_db, cal_target)
 
@@ -410,10 +417,10 @@ def main():
     if click_mode == "🎯 Add Marker" and len(event.selection.points) > 0:
         p = event.selection.points[0]
         if 'x' in p and 'y' in p:
-            gx, gz = reverse_transform(p['x'], p['y'], settings, map_size)
+            gx, gz = reverse_transform(p['x'], p['y'], settings)
             @st.dialog("Add Marker")
             def add_marker_dialog():
-                st.write(f"Grid: {gx/1000:.1f} / {gz/1000:.1f}")
+                st.write(f"Coords: {gx:.0f} / {gz:.0f}")
                 m_type = st.selectbox("Type", list(MARKER_ICONS.keys()))
                 m_label = st.text_input("Label")
                 if st.button("Save"):
