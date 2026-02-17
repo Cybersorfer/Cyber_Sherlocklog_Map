@@ -5,18 +5,26 @@ import pandas as pd
 from PIL import Image
 from datetime import datetime
 
-# --- 1. CONFIGURATION & SAVED CALIBRATION ---
+# --- 1. CONFIGURATION & LOCKED CALIBRATION ---
 st.set_page_config(layout="wide", page_title="DayZ Intel Mapper")
 
-# ⚠️ FINAL CALIBRATION
-DEFAULT_CALIBRATION = {
-    "img_off_x": 127,   
-    "img_off_y": 628,   
-    "img_scale": 1.04,  
-    "target_x": 7464,   
-    "target_y": 7682,
-    "log_off_x": 0,
-    "log_off_y": 0
+# 🔒 HARDCODED WINNING SETTINGS (Hidden from UI)
+LOCKED_SETTINGS = {
+    # Map Image Alignment
+    "img_off_x": 127,
+    "img_off_y": 628,
+    "img_scale": 1.04,
+    "img_opacity": 1.0,
+    
+    # Log Data Alignment (From your screenshot)
+    "log_off_x": 150,
+    "log_off_y": 40,
+    
+    # Logic Defaults
+    "log_format": "Format: <X, Y, Z>", # Defaulting to the format that worked
+    "swap_xy": False,
+    "show_grid": True,
+    "show_towns": True
 }
 
 MAP_CONFIG = {
@@ -64,11 +72,6 @@ DEFAULT_POI_DATABASE = {
     }
 }
 
-MARKER_ICONS = {
-    "Base": "🏠", "Vehicle": "🚗", "Body": "💀", 
-    "Loot": "🎒", "POI": "📍", "Enemy": "⚔️"
-}
-
 # --- 2. HELPERS ---
 @st.cache_resource
 def load_map_image(image_path):
@@ -85,9 +88,7 @@ def parse_log_file_content(content_bytes):
     
     coord_pattern = re.compile(r"<([0-9\.-]+),\s*([0-9\.-]+),\s*([0-9\.-]+)>")
     name_pattern = re.compile(r'(?:Player|Identity)\s+"([^"]+)"')
-    # Regex to capture Date + Time (YYYY-MM-DD HH:MM:SS)
     datetime_pattern = re.compile(r'(\d{4}-\d{2}-\d{2}\s\d{2}:\d{2}:\d{2})')
-    # Fallback to just time if date is missing
     time_pattern = re.compile(r'(\d{2}:\d{2}:\d{2})')
 
     for line in lines:
@@ -96,41 +97,32 @@ def parse_log_file_content(content_bytes):
             v1, v2, v3 = coord_match.groups()
             name_match = name_pattern.search(line)
             
-            # --- DATE PARSING ---
             dt_match = datetime_pattern.search(line)
             t_match = time_pattern.search(line)
             
-            # Prefer full date, fallback to time, else unknown
             if dt_match:
                 time_str = dt_match.group(1)
-                try:
-                    log_time = datetime.strptime(time_str, "%Y-%m-%d %H:%M:%S")
-                except:
-                    log_time = None
+                try: log_time = datetime.strptime(time_str, "%Y-%m-%d %H:%M:%S")
+                except: log_time = None
             elif t_match:
                 time_str = t_match.group(1)
-                try:
-                    log_time = datetime.strptime(time_str, "%H:%M:%S") # Dummy date
-                except:
-                    log_time = None
+                try: log_time = datetime.strptime(time_str, "%H:%M:%S")
+                except: log_time = None
             else:
                 time_str = "Unknown Time"
                 log_time = None
 
             name = name_match.group(1) if name_match else "Unknown"
             
-            # --- HIT DETECTION ---
-            # Identify if this is a combat event
             content_lower = line.lower()
             is_hit = any(x in content_lower for x in ['hit', 'damage', 'shot', 'killed', 'unconscious'])
-            icon = "💥" if is_hit else "👤" # Hit vs Player Icon
+            icon = "💥" if is_hit else "👤"
             
             logs.append({
                 "time_obj": log_time,
                 "time_str": time_str,
                 "name": name,
-                "icon": icon, # Stored for plotting
-                "type": "Hit" if is_hit else "Move",
+                "icon": icon,
                 "raw_1": float(v1),
                 "raw_2": float(v2),
                 "raw_3": float(v3)
@@ -158,14 +150,8 @@ def transform_coords(game_x, game_y, settings):
     final_y = game_x if settings['swap_xy'] else game_y
     return final_x, final_y
 
-def reverse_transform(plot_x, plot_y, settings):
-    game_x = plot_x
-    game_y = plot_y
-    if settings['swap_xy']: return game_y, game_x
-    return game_x, game_y
-
 # --- 4. RENDER ENGINE ---
-def render_map(df, map_name, settings, search_term, custom_markers, active_layers, poi_db, cal_target):
+def render_map(df, map_name, settings, search_term, custom_markers, active_layers, poi_db):
     config = MAP_CONFIG[map_name]
     map_size = config["size"]
     fig = go.Figure()
@@ -190,10 +176,9 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
     else:
         fig.add_shape(type="rect", x0=0, y0=0, x1=map_size, y1=map_size, line=dict(color="RoyalBlue"))
 
-    # B. PHYSICAL GRID TRACE
+    # B. PHYSICAL GRID
     if settings['show_grid']:
-        grid_x = []
-        grid_y = []
+        grid_x, grid_y = [], []
         for i in range(16): 
             pos = i * 1000
             grid_x.extend([pos, pos, None]) 
@@ -209,26 +194,7 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
             hoverinfo='skip', name='Grid'
         ))
 
-    # C. SENSOR LAYER
-    fig.add_trace(go.Heatmap(
-        z=[[0, 0], [0, 0]], x=[0, map_size], y=[0, map_size],
-        opacity=0, showscale=False, hoverinfo="none", 
-        hovertemplate="<extra></extra>"
-    ))
-
-    # D. CALIBRATION TARGET
-    if cal_target['active']:
-        tx, ty = transform_coords(cal_target['x'], cal_target['y'], settings)
-        fig.add_trace(go.Scatter(
-            x=[tx], y=[ty], mode='markers+text',
-            marker=dict(size=25, color='red', symbol='cross-thin', line=dict(width=3, color='red')),
-            text=["🎯 TARGET"], textposition="top center",
-            textfont=dict(color="red", size=16, family="Arial Black"),
-            hovertemplate="Target<br>Game: %{x:.0f} / %{y:.0f}<extra></extra>",
-            name="Calibration Target"
-        ))
-
-    # E. TOWNS
+    # C. TOWNS & POIS
     if settings['show_towns'] and map_name in TOWN_DATA:
         t_x, t_y, t_names = [], [], []
         for town in TOWN_DATA[map_name]:
@@ -243,7 +209,6 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
             name="Towns"
         ))
 
-    # F. POI LAYERS
     if map_name in poi_db:
         for layer_name, locations in poi_db[map_name].items():
             if layer_name in active_layers:
@@ -263,108 +228,72 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
                     hovertemplate="<b>%{text}</b><br>Game: %{x:.0f} / %{y:.0f}<extra></extra>"
                 ))
 
-    # G. CUSTOM MARKERS
-    if custom_markers:
-        c_x, c_y, c_text = [], [], []
-        for m in custom_markers:
-            cx, cy = transform_coords(m['x'], m['y'], settings)
-            c_x.append(cx); c_y.append(cy)
-            c_text.append(MARKER_ICONS.get(m['type'], "📍"))
-
-        fig.add_trace(go.Scatter(
-            x=c_x, y=c_y, mode='text', text=c_text, textfont=dict(size=24),
-            name="Custom", hoverinfo="text", hovertext=[m['label'] for m in custom_markers]
-        ))
-
-    # H. PLAYERS & EVENTS (ICONS & ADM COORDS)
+    # D. PLAYERS (LOGS)
     if not df.empty:
         raw_x = df["raw_1"]
-        # Determine Logic
+        # Use our locked logic preference
         if settings['log_format'] == "Format: <X, Y, Z>":
-            raw_y = df["raw_2"] # Y is 2nd value
+            raw_y = df["raw_2"] 
             adm_display_x = df["raw_1"]
             adm_display_y = df["raw_2"]
         else:
-            raw_y = df["raw_3"] # Y is 3rd value
+            raw_y = df["raw_3"] 
             adm_display_x = df["raw_1"]
             adm_display_y = df["raw_3"]
             
         fx, fy = transform_coords(raw_x, raw_y, settings)
         
-        # Apply Log Offset
+        # Apply Locked Log Offset
         fx = fx + settings['log_off_x']
         fy = fy + settings['log_off_y']
         
         if search_term:
-            # Simple filter for search
             df['filtered'] = df['name'].str.contains(search_term, case=False, na=False)
             df_plot = df[df['filtered']].copy()
-            # If empty after search, don't crash
-            if df_plot.empty:
-                df_plot = df.head(0)
-            
-            # Sync coordinate arrays to filtered df
-            # We need to re-calc coords for just the filtered rows to match index
-            # Or simpler: Just re-calculate everything for the filtered subset
-            # Let's do the latter to avoid index mismatch
             if not df_plot.empty:
+                # Re-calculate subsets for safe indexing
                 p_x = df_plot["raw_1"]
                 p_y = df_plot["raw_2"] if settings['log_format'] == "Format: <X, Y, Z>" else df_plot["raw_3"]
                 p_fx, p_fy = transform_coords(p_x, p_y, settings)
                 p_fx = p_fx + settings['log_off_x']
                 p_fy = p_fy + settings['log_off_y']
                 
-                # Update display vars
                 adm_x = df_plot["raw_1"]
                 adm_y = p_y
                 
-                # Plot
                 fig.add_trace(go.Scatter(
                     x=p_fx, y=p_fy, mode='text',
-                    text=df_plot["icon"], # 👤 or 💥
-                    textfont=dict(size=14), # Mini Icon Size
+                    text=df_plot["icon"],
+                    textfont=dict(size=14),
                     customdata=list(zip(df_plot["time_str"], df_plot["name"], adm_x, adm_y)),
-                    hovertemplate=(
-                        "<b>%{customdata[0]}</b><br>" + # Time/Date
-                        "Player: %{customdata[1]}<br>" + # Name
-                        "ADM: %{customdata[2]:.1f} / %{customdata[3]:.1f}<extra></extra>" # Raw X/Y
-                    ),
+                    hovertemplate="<b>%{customdata[0]}</b><br>Player: %{customdata[1]}<br>ADM: %{customdata[2]:.1f} / %{customdata[3]:.1f}<extra></extra>",
                     name="Logs"
                 ))
         else:
-            # No Search: Plot All
             fig.add_trace(go.Scatter(
                 x=fx, y=fy, mode='text',
-                text=df["icon"], # 👤 or 💥
-                textfont=dict(size=14), # Mini Icon Size
+                text=df["icon"],
+                textfont=dict(size=14),
                 customdata=list(zip(df["time_str"], df["name"], adm_display_x, adm_display_y)),
-                hovertemplate=(
-                    "<b>%{customdata[0]}</b><br>" + 
-                    "Player: %{customdata[1]}<br>" + 
-                    "ADM: %{customdata[2]:.1f} / %{customdata[3]:.1f}<extra></extra>"
-                ),
+                hovertemplate="<b>%{customdata[0]}</b><br>Player: %{customdata[1]}<br>ADM: %{customdata[2]:.1f} / %{customdata[3]:.1f}<extra></extra>",
                 name="Logs"
             ))
 
-    # I. RULERS
-    grid_vals_x = []
-    grid_text_x = []
+    # E. RULERS
+    grid_vals_x, grid_text_x = [], []
     for i in range(16): 
-        grid_vals_x.append(i * 1000)
-        grid_text_x.append(f"{i:02d}")
-
-    grid_vals_y = []
-    grid_text_y = []
+        grid_vals_x.append(i * 1000); grid_text_x.append(f"{i:02d}")
+    grid_vals_y, grid_text_y = [], []
     for i in range(16): 
-        grid_vals_y.append(i * 1000)      
-        grid_text_y.append(f"{15-i:02d}")
+        grid_vals_y.append(i * 1000); grid_text_y.append(f"{15-i:02d}")
 
-    # J. LAYOUT
+    # F. LAYOUT (Optimized margins & Click disabled)
     fig.update_layout(
         height=900,
-        margin={"l": 40, "r": 40, "t": 40, "b": 40},
+        # Increased Top Margin (t=60) to prevent modebar overlap
+        margin={"l": 40, "r": 40, "t": 60, "b": 40}, 
         plot_bgcolor="#0e1117", paper_bgcolor="#0e1117",
-        dragmode="pan" if settings['click_mode'] == "Navigate" else False,
+        dragmode="pan", # Only Pan is allowed
         hovermode="closest", showlegend=True,
         legend=dict(yanchor="top", y=0.95, xanchor="right", x=0.99, bgcolor="rgba(0,0,0,0.6)", font=dict(color="white")),
         
@@ -387,14 +316,19 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
 
 # --- 5. UI MAIN ---
 def main():
-    if 'custom_markers' not in st.session_state: st.session_state['custom_markers'] = []
-    
+    # CSS HACKS to hide Header & Menu
     st.markdown("""
     <style>
         .stApp { background-color: #0e1117; color: #fafafa; }
         [data-testid="stSidebar"] { background-color: #262730; }
         [data-testid="stSidebar"] * { color: #cccccc !important; }
+        /* Remove white header space */
+        header[data-testid="stHeader"] { visibility: hidden; }
+        /* Reduce top padding significantly */
         .block-container { padding-top: 1rem !important; }
+        /* Hide "Manage App" button if possible */
+        #MainMenu { visibility: hidden; }
+        footer { visibility: hidden; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -404,6 +338,9 @@ def main():
         
         st.write("---")
         uploaded_log = st.file_uploader("1. Upload Logs", type=['adm', 'rpt', 'log'])
+        
+        # User requested explanation of POI DB
+        st.info("ℹ️ **Upload POI DB**: Optional. Upload a CSV to show permanent markers (Trader zones, Bases, etc).")
         uploaded_csv = st.file_uploader("2. Upload POI DB", type=['csv'])
         
         if uploaded_csv:
@@ -415,107 +352,44 @@ def main():
         df = parse_log_file_content(uploaded_log.getvalue()) if uploaded_log else pd.DataFrame()
 
         if not df.empty and 'time_obj' in df.columns:
-            # Convert time_obj column for slider (handling NaTs)
             valid_times = df.dropna(subset=['time_obj'])
             if not valid_times.empty:
                 st.markdown("---")
                 st.subheader("⏳ Time")
-                # We need purely time or datetime. Let's assume day is same or ignore day for slider.
-                # Simplification: Just slide by index or strings? No, time slider.
-                # If we have full dates, the slider should be datetime.
                 min_t, max_t = valid_times['time_obj'].min(), valid_times['time_obj'].max()
                 if min_t != max_t:
-                    # Streamlit slider supports datetime if types match
                     try:
                         start_time, end_time = st.slider("Window", value=(min_t, max_t), format="MM-DD HH:mm")
                         df = df[(df['time_obj'] >= start_time) & (df['time_obj'] <= end_time)]
-                    except:
-                        st.warning("Logs span multiple types, time slider disabled.")
+                    except: pass
 
         st.markdown("---")
         available_layers = current_db.get(selected_map, {}).keys()
         active_layers = [layer for layer in available_layers if st.checkbox(layer, value=True)]
         
-        click_mode = st.radio("Mode", ["Navigate", "🎯 Add Marker"], horizontal=True)
         search_term = st.text_input("Search", placeholder="Player...")
         
-        st.write("---")
-        st.subheader("🔧 Calibration")
-
-        with st.form("calibration_form"):
-            with st.expander("🎯 Calibration Target", expanded=True):
-                st.caption("Coordinates of known landmark.")
-                show_target = st.checkbox("Show Target", value=True)
-                target_x = st.number_input("Target X", value=DEFAULT_CALIBRATION['target_x'], step=10)
-                target_y = st.number_input("Target Y", value=DEFAULT_CALIBRATION['target_y'], step=10)
-
-            with st.expander("🖼️ Map Image", expanded=True):
-                st.info("Align map to Target.")
-                img_off_x = st.slider("Image X", -2000, 2000, DEFAULT_CALIBRATION['img_off_x'], 10, key="cal_img_x_final_14") 
-                img_off_y = st.slider("Image Y", -2000, 2000, DEFAULT_CALIBRATION['img_off_y'], 10, key="cal_img_y_final_14") 
-                img_scale = st.slider("Image Scale", 0.8, 1.2, DEFAULT_CALIBRATION['img_scale'], 0.001, key="cal_img_scale_final_14") 
-                img_opacity = st.slider("Opacity", 0.1, 1.0, 1.0, 0.1)
-
-            with st.expander("⚙️ Settings (Log Tuning)", expanded=True):
-                log_format = st.radio(
-                    "📂 Log Format",
-                    ["Format: <X, Y, Z>", "Format: <X, Height, Y>"],
-                    index=0,
-                    help="Switch this if dots appear at the bottom edge."
-                )
-                st.write("📍 **Log Alignment (Fine Tune)**")
-                log_off_x = st.slider("Log X Offset", -1000, 1000, DEFAULT_CALIBRATION['log_off_x'], 10, key="cal_log_x_14")
-                log_off_y = st.slider("Log Y Offset", -1000, 1000, DEFAULT_CALIBRATION['log_off_y'], 10, key="cal_log_y_14")
-                
-                swap_xy = st.checkbox("Swap X/Y Inputs", False)
-                show_grid = st.checkbox("Show Grid (0-15)", True)
-                show_towns = st.checkbox("Show Towns", True)
-
-            applied = st.form_submit_button("✅ Apply Calibration")
-            
-        settings = {
-            "img_off_x": img_off_x, "img_off_y": img_off_y, "img_scale": img_scale, "img_opacity": img_opacity,
-            "log_format": log_format, "swap_xy": swap_xy, 
-            "log_off_x": log_off_x, "log_off_y": log_off_y,
-            "click_mode": click_mode, "show_grid": show_grid, "show_towns": show_towns
-        }
+        # Settings are now LOCKED and hidden from UI, but applied in logic
         
-        cal_target = {"active": show_target, "x": target_x, "y": target_y}
-            
-        if st.session_state['custom_markers'] and st.button("Clear Markers"):
-            st.session_state['custom_markers'] = []
-            st.rerun()
-
-    col1, col2 = st.columns([0.85, 0.15])
+    col1, col2 = st.columns([0.95, 0.05]) # maximized width
     with col1: 
         st.subheader(f"📍 {selected_map}")
-        st.caption("ℹ️ Click to Add Markers. Pop-up shows GPS.")
     
-    fig, map_size = render_map(df, selected_map, settings, search_term, st.session_state['custom_markers'], active_layers, current_db, cal_target)
+    # Render with LOCKED settings
+    fig, map_size = render_map(df, selected_map, LOCKED_SETTINGS, search_term, [], active_layers, current_db)
 
-    event = st.plotly_chart(
-        fig, on_select="rerun", selection_mode="points", use_container_width=True,
-        config={'scrollZoom': True, 'displayModeBar': True, 'modeBarButtonsToAdd': ['zoomIn2d', 'zoomOut2d', 'resetScale2d', 'pan2d'], 'displaylogo': False}
+    # Display Chart (Interactions Disabled)
+    st.plotly_chart(
+        fig, 
+        use_container_width=True,
+        config={
+            'scrollZoom': True, 
+            'displayModeBar': True, 
+            'displaylogo': False,
+            # This disables the "Selection" tool which causes reloads
+            'modeBarButtonsToRemove': ['select2d', 'lasso2d', 'autoScale2d']
+        }
     )
-
-    if click_mode == "🎯 Add Marker" and len(event.selection.points) > 0:
-        p = event.selection.points[0]
-        if 'x' in p and 'y' in p:
-            gx, gy = reverse_transform(p['x'], p['y'], settings)
-            @st.dialog("Add Marker")
-            def add_marker_dialog():
-                gps_x = gx / 10000
-                gps_y = (map_size - gy) / 10000
-                
-                st.write(f"GPS: X: {gps_x:.2f} Y: {gps_y:.2f}")
-                st.write(f"Game: {gx:.0f} / {gy:.0f}")
-                
-                m_type = st.selectbox("Type", list(MARKER_ICONS.keys()))
-                m_label = st.text_input("Label")
-                if st.button("Save"):
-                    st.session_state['custom_markers'].append({"type": m_type, "label": m_label, "x": gx, "y": gy})
-                    st.rerun()
-            add_marker_dialog()
 
 if __name__ == "__main__":
     main()
