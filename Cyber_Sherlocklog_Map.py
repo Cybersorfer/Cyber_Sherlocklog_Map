@@ -3,7 +3,7 @@ import plotly.graph_objects as go
 import re
 import pandas as pd
 from PIL import Image
-from datetime import datetime, time
+from datetime import datetime
 
 # --- 1. CONFIGURATION ---
 st.set_page_config(layout="wide", page_title="DayZ Intel Mapper")
@@ -14,22 +14,22 @@ MAP_CONFIG = {
     "Sakhal": {"size": 8192, "image": "map_sakhal.png"}
 }
 
-# --- CORRECTED COORDINATE DATABASE (Based on iZurvive) ---
+# --- DATABASE (Matched to Game Coordinates: 0,0 is Bottom-Left) ---
 TOWN_DATA = {
     "Chernarus": [
-        {"name": "NWAF", "x": 4500, "z": 10000},       # Adjusted to Runway Center
-        {"name": "Severograd", "x": 8400, "z": 12700}, # FIXED: Was 13700 (Too High)
-        {"name": "Stary Sobor", "x": 6000, "z": 7700},
+        {"name": "NWAF", "x": 4600, "z": 10200},
+        {"name": "Severograd", "x": 8400, "z": 12700},
+        {"name": "Stary Sobor", "x": 6050, "z": 7750},
         {"name": "Novy Sobor", "x": 7100, "z": 7700},
-        {"name": "Vybor", "x": 3800, "z": 8900},
+        {"name": "Vybor", "x": 3750, "z": 8900},
         {"name": "Gorka", "x": 9500, "z": 8800},
-        {"name": "Chernogorsk", "x": 6600, "z": 2600},
+        {"name": "Chernogorsk", "x": 6650, "z": 2600},
         {"name": "Elektrozavodsk", "x": 10450, "z": 2300},
         {"name": "Berezino", "x": 12400, "z": 9600},
-        {"name": "Zelenogorsk", "x": 2700, "z": 5300},
-        {"name": "Tisy Base", "x": 1700, "z": 13800},  # Adjusted for Base center
+        {"name": "Zelenogorsk", "x": 2750, "z": 5300},
+        {"name": "Tisy Base", "x": 1700, "z": 14000},
         {"name": "Krasnostav", "x": 11200, "z": 12300},
-        {"name": "Solnichniy", "x": 13400, "z": 6200}, # Adjusted East
+        {"name": "Solnichniy", "x": 13350, "z": 6200},
         {"name": "Kamyshovo", "x": 12000, "z": 3500},
         {"name": "Balota", "x": 4400, "z": 2400},
         {"name": "VMC", "x": 4500, "z": 8300},
@@ -58,7 +58,7 @@ MARKER_ICONS = {
     "Loot": "🎒", "POI": "📍", "Enemy": "⚔️"
 }
 
-# --- 2. CACHED LOADERS ---
+# --- 2. HELPERS ---
 @st.cache_resource
 def load_map_image(image_path):
     try:
@@ -72,6 +72,7 @@ def parse_log_file_content(content_bytes):
     content = content_bytes.decode("utf-8", errors='ignore')
     lines = content.split('\n')
     
+    # Matches <X, Z, Y> or <X, Y, Z>
     coord_pattern = re.compile(r"<([0-9\.-]+),\s*([0-9\.-]+),\s*([0-9\.-]+)>")
     name_pattern = re.compile(r'(?:Player|Identity)\s+"([^"]+)"')
     time_pattern = re.compile(r'^(\d{2}:\d{2}:\d{2})')
@@ -115,35 +116,34 @@ def parse_poi_csv(uploaded_csv):
     except Exception:
         return DEFAULT_POI_DATABASE
 
-# --- 3. MATH ---
-def transform_coords(raw_x, raw_z, settings, map_size):
-    # Swap X/Z
-    final_x = raw_z if settings['swap_xz'] else raw_x
-    final_z = raw_x if settings['swap_xz'] else raw_z
+# --- 3. MATH (STRICT GAME COORDINATES) ---
+def transform_coords(game_x, game_z, settings, map_size):
+    """
+    Converts DayZ Game Coordinates (0,0 Bottom-Left) to Plot Coordinates (0,0 Top-Left).
+    """
+    final_x = game_z if settings['swap_xz'] else game_x
+    final_z = game_x if settings['swap_xz'] else game_z
     
-    # Invert Z (DayZ N=Max -> Image Top=0)
-    if settings['invert_z']: 
-        final_z = map_size - final_z
-
-    # Scale/Offset (Applied to COORDINATES)
-    final_x = (final_x * settings['scale_factor']) + settings['off_x']
-    final_z = (final_z * settings['scale_factor']) + settings['off_y']
+    # Invert Vertical (Game Z=0 is Bottom, Image Y=0 is Top)
+    # We map Game Z (0 to 15360) to Plot Y (15360 to 0)
+    plot_x = final_x
+    plot_y = map_size - final_z 
     
-    return final_x, final_z
+    return plot_x, plot_y
 
 def reverse_transform(plot_x, plot_y, settings, map_size):
-    rx = (plot_x - settings['off_x']) / settings['scale_factor']
-    rz = (plot_y - settings['off_y']) / settings['scale_factor']
+    """
+    Converts Plot Coordinates back to Game Coordinates.
+    """
+    game_x = plot_x
+    game_z = map_size - plot_y
     
-    if settings['invert_z']: 
-        rz = map_size - rz
-        
-    game_x = rz if settings['swap_xz'] else rx
-    game_z = rx if settings['swap_xz'] else rz
+    if settings['swap_xz']:
+        return game_z, game_x
     return game_x, game_z
 
 # --- 4. RENDER ENGINE ---
-def render_map(df, map_name, settings, search_term, custom_markers, active_layers, poi_db):
+def render_map(df, map_name, settings, search_term, custom_markers, active_layers, poi_db, cal_target):
     config = MAP_CONFIG[map_name]
     map_size = config["size"]
     fig = go.Figure()
@@ -151,14 +151,17 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
     # A. IMAGE LAYER (Background)
     img = load_map_image(config["image"])
     if img:
+        img_width = map_size * settings['img_scale']
+        img_height = map_size * settings['img_scale']
+        
         fig.add_layout_image(
             dict(
                 source=img,
                 xref="x", yref="y",
-                x=settings['img_off_x'], 
-                y=settings['img_off_y'],
-                sizex=map_size * settings['img_scale'], 
-                sizey=map_size * settings['img_scale'],
+                x=settings['img_off_x'],        
+                y=settings['img_off_y'],        
+                sizex=img_width,
+                sizey=img_height,
                 sizing="stretch",
                 opacity=settings['img_opacity'],
                 layer="below"
@@ -167,22 +170,26 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
     else:
         fig.add_shape(type="rect", x0=0, y0=0, x1=map_size, y1=map_size, line=dict(color="RoyalBlue"))
 
-    # B. COORDINATE SYSTEM & RULERS (Native Plotly Axes)
-    
-    # We create ticks for 0 to 16 (0k to 16k)
-    # The map size is ~15360, but the grid goes to 16 lines
-    tick_vals = []
-    tick_text = []
-    
-    for i in range(17): # 0 to 16
-        pos = i * 1000
+    # B. CALIBRATION TARGET (The Red Crosshair)
+    if cal_target['active']:
+        tx, ty = transform_coords(cal_target['x'], cal_target['z'], settings, map_size)
+        fig.add_trace(go.Scatter(
+            x=[tx], y=[ty], mode='markers+text',
+            marker=dict(size=25, color='red', symbol='cross-thin', line=dict(width=3, color='red')),
+            text=["🎯 TARGET"], textposition="top center",
+            textfont=dict(color="red", size=16, family="Arial Black"),
+            name="Calibration Target"
+        ))
         
-        # Apply the GRID calibration to the rulers
-        # This ensures the ruler moves WITH the yellow dots if you move the grid
-        t_pos = (pos * settings['scale_factor']) + (settings['off_x'] if i==0 else 0) 
+        # Also show corners if active
+        c1x, c1y = transform_coords(0, 0, settings, map_size) # Bottom Left (Game) -> Bottom Left (Plot)
+        c2x, c2y = transform_coords(map_size, map_size, settings, map_size) # Top Right
         
-        tick_vals.append(pos)
-        tick_text.append(f"{i:02d}")
+        fig.add_trace(go.Scatter(
+            x=[c1x, c2x], y=[c1y, c2y], mode='markers',
+            marker=dict(size=15, color='red', symbol='x'),
+            name="Corners", hoverinfo='skip'
+        ))
 
     # C. TOWNS
     if settings['show_towns'] and map_name in TOWN_DATA:
@@ -233,7 +240,9 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
     # F. PLAYERS
     if not df.empty:
         raw_x = df["raw_1"]
-        raw_z = df["raw_2"] if settings['use_y_as_z'] else df["raw_3"]
+        # Use col 3 as Z if Ocean Fix is on (Standard <x, y, z> log format)
+        raw_z = df["raw_3"] if settings['use_y_as_z'] else df["raw_2"]
+        
         fx, fz = transform_coords(raw_x, raw_z, settings, map_size)
         
         colors = ['red'] * len(df)
@@ -251,69 +260,50 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
             name="Logs"
         ))
 
-    # G. LAYOUT & RULERS
-    
-    # Calculate Axis Ranges based on Grid Calibration
-    # Grid goes from 0 to 15360 (approx 15.36km)
-    # We pad it to -1000 and 16000 to show the rulers cleanly
-    
-    # Apply Calibration to the Grid Lines
-    grid_ticks_x = []
-    grid_labels_x = []
-    for i in range(17): # 00 to 16
-        val = (i * 1000 * settings['scale_factor']) + settings['off_x']
-        grid_ticks_x.append(val)
-        grid_labels_x.append(f"{i:02d}")
-        
-    grid_ticks_y = []
-    grid_labels_y = []
-    for i in range(17):
-        val = (i * 1000 * settings['scale_factor']) + settings['off_y']
-        grid_ticks_y.append(val)
-        grid_labels_y.append(f"{i:02d}")
+    # G. RULERS (00 - 15)
+    grid_vals = []
+    grid_text = []
+    for i in range(17): # 0 to 16
+        grid_vals.append(i * 1000)
+        grid_text.append(f"{i:02d}")
 
-    # Set display range slightly larger than grid
-    min_view_x = grid_ticks_x[0] - 500
-    max_view_x = grid_ticks_x[-1] + 500
-    min_view_y = grid_ticks_y[0] - 500
-    max_view_y = grid_ticks_y[-1] + 500
-
+    # H. LAYOUT
     fig.update_layout(
         height=900,
-        margin={"l": 50, "r": 50, "t": 50, "b": 50},
+        margin={"l": 40, "r": 40, "t": 40, "b": 40},
         plot_bgcolor="#0e1117", paper_bgcolor="#0e1117",
         dragmode="pan" if settings['click_mode'] == "Navigate" else False,
         showlegend=True,
         legend=dict(yanchor="top", y=0.95, xanchor="right", x=0.99, bgcolor="rgba(0,0,0,0.6)", font=dict(color="white")),
         
-        # --- X AXIS (TOP RULER) ---
+        # --- X AXIS (00 - 15 West to East) ---
         xaxis=dict(
             visible=True,
-            range=[min_view_x, max_view_x],
+            range=[-500, map_size + 500],
             side="top",
             showgrid=settings['show_grid'],
             gridcolor="rgba(255, 255, 255, 0.2)",
             gridwidth=1,
             tickmode="array",
-            tickvals=grid_ticks_x,
-            ticktext=grid_labels_x,
+            tickvals=grid_vals,
+            ticktext=grid_text,
             tickfont=dict(color="white", size=14, family="Arial Black"),
             zeroline=False
         ),
 
-        # --- Y AXIS (LEFT RULER) ---
+        # --- Y AXIS (00 - 15 North to South) ---
         yaxis=dict(
             visible=True,
-            range=[max_view_y, min_view_y], # Inverted: 0 at top, 16 at bottom
+            range=[map_size + 500, -500], # Inverted: 0 (North) at top
             side="left",
             showgrid=settings['show_grid'],
             gridcolor="rgba(255, 255, 255, 0.2)",
             gridwidth=1,
             tickmode="array",
-            tickvals=grid_ticks_y,
-            ticktext=grid_labels_y,
+            tickvals=grid_vals,
+            ticktext=grid_text,
             tickfont=dict(color="white", size=14, family="Arial Black"),
-            scaleanchor="x", # LOCKED ASPECT RATIO
+            scaleanchor="x",
             scaleratio=1,
             zeroline=False
         )
@@ -368,38 +358,40 @@ def main():
         
         st.write("---")
         st.subheader("🔧 Calibration")
-        st.info("💡 Adjust sliders then click 'Apply' to update.")
 
-        # --- FORM START ---
         with st.form("calibration_form"):
-            # 1. Map Image Calibration
+            # 1. Calibration Target (NEW)
+            with st.expander("🎯 Calibration Target (Use Center)", expanded=True):
+                st.caption("Enter known coordinates (e.g. from iZurvive) to plot a reference target.")
+                show_target = st.checkbox("Show Target", value=True)
+                # Defaults set to your "Center" marker
+                target_x = st.number_input("Target X", value=7550, step=10)
+                target_z = st.number_input("Target Z (South-North)", value=7812, step=10)
+
+            # 2. Map Image Calibration
             with st.expander("🖼️ Map Image (Background)", expanded=True):
-                # Set defaults based on analysis
-                img_off_x = st.slider("Image X", -4000, 4000, -200, 10) 
-                img_off_y = st.slider("Image Y", -4000, 4000, -500, 10)
-                img_scale = st.slider("Image Scale", 0.5, 1.5, 1.05, 0.005)
+                st.info("Move the sliders until the map matches the Target 🎯.")
+                img_off_x = st.slider("Image X", -2000, 2000, -100, 10) 
+                img_off_y = st.slider("Image Y", -2000, 2000, -300, 10)
+                img_scale = st.slider("Image Scale", 0.8, 1.2, 1.05, 0.001) # Finer control
                 img_opacity = st.slider("Opacity", 0.1, 1.0, 1.0, 0.1)
 
-            # 2. Coordinate Calibration
-            with st.expander("📍 Coordinates (Grid/Pins)", expanded=False):
-                use_y_as_z = st.checkbox("Fix Ocean (Use Y as Z)", True)
-                swap_xz = st.checkbox("Swap X/Z", False)
-                invert_z = st.checkbox("Invert Vertical (Z)", True)
-                show_grid = st.checkbox("Show Grid (0-16)", True)
+            # 3. Logic Settings
+            with st.expander("⚙️ Settings", expanded=False):
+                use_y_as_z = st.checkbox("Fix Ocean (Log Y=Height)", True)
+                swap_xz = st.checkbox("Swap X/Z Inputs", False)
+                show_grid = st.checkbox("Show Grid (0-15)", True)
                 show_towns = st.checkbox("Show Towns", True)
-                
-                off_x = st.slider("Grid X Offset", -4000, 4000, 0, 10)
-                off_y = st.slider("Grid Y Offset", -4000, 4000, 0, 10)
-                scale_factor = st.slider("Grid Scale", 0.5, 1.5, 1.0, 0.005)
 
             applied = st.form_submit_button("✅ Apply Calibration")
             
         settings = {
             "img_off_x": img_off_x, "img_off_y": img_off_y, "img_scale": img_scale, "img_opacity": img_opacity,
-            "use_y_as_z": use_y_as_z, "swap_xz": swap_xz, "invert_z": invert_z,
-            "off_x": off_x, "off_y": off_y, "scale_factor": scale_factor,
+            "use_y_as_z": use_y_as_z, "swap_xz": swap_xz, 
             "click_mode": click_mode, "show_grid": show_grid, "show_towns": show_towns
         }
+        
+        cal_target = {"active": show_target, "x": target_x, "z": target_z}
             
         if st.session_state['custom_markers'] and st.button("Clear Markers"):
             st.session_state['custom_markers'] = []
@@ -408,7 +400,7 @@ def main():
     col1, col2 = st.columns([0.85, 0.15])
     with col1: st.subheader(f"📍 {selected_map}")
     
-    fig, map_size = render_map(df, selected_map, settings, search_term, st.session_state['custom_markers'], active_layers, current_db)
+    fig, map_size = render_map(df, selected_map, settings, search_term, st.session_state['custom_markers'], active_layers, current_db, cal_target)
 
     event = st.plotly_chart(
         fig, on_select="rerun", selection_mode="points", use_container_width=True,
