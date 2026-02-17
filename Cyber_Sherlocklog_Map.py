@@ -5,8 +5,17 @@ import pandas as pd
 from PIL import Image
 from datetime import datetime
 
-# --- 1. CONFIGURATION ---
+# --- 1. CONFIGURATION & SAVED CALIBRATION ---
 st.set_page_config(layout="wide", page_title="DayZ Intel Mapper")
+
+# ⚠️ UPDATE THESE NUMBERS WITH YOUR WINNING SETTINGS! ⚠️
+DEFAULT_CALIBRATION = {
+    "img_off_x": -100,  # Replace with your "Image X"
+    "img_off_y": -300,  # Replace with your "Image Y"
+    "img_scale": 1.04,  # Replace with your "Image Scale"
+    "target_x": 7441,   # Your Target X
+    "target_y": 7043    # Your Target Y
+}
 
 MAP_CONFIG = {
     "Chernarus": {"size": 15360, "image": "map_chernarus.png"},
@@ -14,7 +23,7 @@ MAP_CONFIG = {
     "Sakhal": {"size": 8192, "image": "map_sakhal.png"}
 }
 
-# --- DATABASE (Standard DayZ Coordinates: X, Y) ---
+# --- DATABASE (Standard DayZ Coordinates) ---
 TOWN_DATA = {
     "Chernarus": [
         {"name": "NWAF", "x": 4600, "y": 10200},
@@ -135,8 +144,9 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
     map_size = config["size"]
     fig = go.Figure()
 
-    # A. SENSOR LAYER (Invisible Heatmap for Hover Coordinates)
-    # We display Game coordinates and basic GPS approximation (Coord / 10000)
+    # A. SENSOR LAYER (Invisible Heatmap for Hover)
+    # This handles the GPS logic calculation for the tooltip
+    # GPS Y = (MapSize - GameY) / 10000
     fig.add_trace(go.Heatmap(
         z=[[0, 0], [0, 0]], 
         x=[0, map_size], 
@@ -144,7 +154,12 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
         opacity=0, 
         showscale=False,
         hoverinfo="none", 
-        hovertemplate="Game: %{x:.0f} / %{y:.0f}<extra></extra>"
+        hovertemplate=(
+            "<b>Game:</b> %{x:.0f} / %{y:.0f}<br>" 
+            # Note: We can't do complex math in the template easily, 
+            # so we display raw and rely on the UI/Dialog for precise GPS
+            "<extra></extra>"
+        )
     ))
 
     # B. IMAGE LAYER (Background)
@@ -252,25 +267,20 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
             name="Logs"
         ))
 
-    # H. RULERS GENERATION
-    # X Axis (West to East): 00 -> 15
+    # H. RULERS
+    # X Axis (00-15)
     grid_vals_x = []
     grid_text_x = []
     for i in range(17): 
         grid_vals_x.append(i * 1000)
         grid_text_x.append(f"{i:02d}")
 
-    # Y Axis (South to North): 15 -> 00
-    # In Cartesian: 0 is Bottom (South), 15000 is Top (North).
-    # iZurvive Ruler: Bottom is 15, Top is 00.
-    # So we must REVERSE the labels for the Y axis relative to the values.
+    # Y Axis (15-00) REVERSED
     grid_vals_y = []
     grid_text_y = []
     for i in range(17): 
-        grid_vals_y.append(i * 1000)      # 0, 1000, 2000...
-        # If i=0 (Bottom), we want label "15" (or "16" if map is huge, but usually 0-15)
-        # 15 - 0 = 15. 15 - 15 = 00.
-        grid_text_y.append(f"{15-i:02d}") # 15, 14, 13... 00
+        grid_vals_y.append(i * 1000)      
+        grid_text_y.append(f"{15-i:02d}") # 15 at bottom (0), 00 at top (15000)
 
     # I. LAYOUT
     fig.update_layout(
@@ -282,36 +292,19 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
         showlegend=True,
         legend=dict(yanchor="top", y=0.95, xanchor="right", x=0.99, bgcolor="rgba(0,0,0,0.6)", font=dict(color="white")),
         
-        # --- X AXIS (00 -> 15) ---
         xaxis=dict(
-            visible=True,
-            range=[-500, map_size + 500],
-            side="top",
-            showgrid=settings['show_grid'],
-            gridcolor="rgba(255, 255, 255, 0.2)",
-            gridwidth=1,
-            tickmode="array",
-            tickvals=grid_vals_x,
-            ticktext=grid_text_x,
-            tickfont=dict(color="white", size=14, family="Arial Black"),
-            zeroline=False
+            visible=True, range=[-500, map_size + 500], side="top",
+            showgrid=settings['show_grid'], gridcolor="rgba(255, 255, 255, 0.2)",
+            tickmode="array", tickvals=grid_vals_x, ticktext=grid_text_x,
+            tickfont=dict(color="white", size=14, family="Arial Black"), zeroline=False
         ),
 
-        # --- Y AXIS (15 -> 00) ---
         yaxis=dict(
-            visible=True,
-            range=[-500, map_size + 500], 
-            side="left",
-            showgrid=settings['show_grid'],
-            gridcolor="rgba(255, 255, 255, 0.2)",
-            gridwidth=1,
-            tickmode="array",
-            tickvals=grid_vals_y,
-            ticktext=grid_text_y, # REVERSED LABELS
+            visible=True, range=[-500, map_size + 500], side="left",
+            showgrid=settings['show_grid'], gridcolor="rgba(255, 255, 255, 0.2)",
+            tickmode="array", tickvals=grid_vals_y, ticktext=grid_text_y,
             tickfont=dict(color="white", size=14, family="Arial Black"),
-            scaleanchor="x",
-            scaleratio=1,
-            zeroline=False
+            scaleanchor="x", scaleratio=1, zeroline=False
         )
     )
     return fig, map_size
@@ -367,16 +360,16 @@ def main():
 
         with st.form("calibration_form"):
             with st.expander("🎯 Calibration Target", expanded=True):
-                st.caption("Enter Game Coordinates (X / Y).")
+                st.caption("Coordinates of known landmark.")
                 show_target = st.checkbox("Show Target", value=True)
-                target_x = st.number_input("Target X", value=7550, step=10)
-                target_y = st.number_input("Target Y", value=7812, step=10)
+                target_x = st.number_input("Target X", value=DEFAULT_CALIBRATION['target_x'], step=10)
+                target_y = st.number_input("Target Y", value=DEFAULT_CALIBRATION['target_y'], step=10)
 
-            with st.expander("🖼️ Map Image (Background)", expanded=True):
-                st.info("Align the map so the landmark matches the Target.")
-                img_off_x = st.slider("Image X", -2000, 2000, -200, 10) 
-                img_off_y = st.slider("Image Y", -2000, 2000, -100, 10) 
-                img_scale = st.slider("Image Scale", 0.8, 1.2, 1.05, 0.001) 
+            with st.expander("🖼️ Map Image", expanded=True):
+                st.info("Align map to Target.")
+                img_off_x = st.slider("Image X", -2000, 2000, DEFAULT_CALIBRATION['img_off_x'], 10) 
+                img_off_y = st.slider("Image Y", -2000, 2000, DEFAULT_CALIBRATION['img_off_y'], 10) 
+                img_scale = st.slider("Image Scale", 0.8, 1.2, DEFAULT_CALIBRATION['img_scale'], 0.001) 
                 img_opacity = st.slider("Opacity", 0.1, 1.0, 1.0, 0.1)
 
             with st.expander("⚙️ Settings", expanded=False):
@@ -402,7 +395,7 @@ def main():
     col1, col2 = st.columns([0.85, 0.15])
     with col1: 
         st.subheader(f"📍 {selected_map}")
-        st.caption("ℹ️ Hover to see GPS & Game Coordinates.")
+        st.caption("ℹ️ Click to Add Markers. Pop-up shows GPS.")
     
     fig, map_size = render_map(df, selected_map, settings, search_term, st.session_state['custom_markers'], active_layers, current_db, cal_target)
 
@@ -417,10 +410,15 @@ def main():
             gx, gy = reverse_transform(p['x'], p['y'], settings)
             @st.dialog("Add Marker")
             def add_marker_dialog():
+                # Correct GPS Calculation (Y Inverted for display)
+                # GPS X = Game X / 10000
+                # GPS Y = (Map Size - Game Y) / 10000
                 gps_x = gx / 10000
-                gps_y = gy / 10000
-                st.write(f"GPS: {gps_x:.2f} / {gps_y:.2f}")
+                gps_y = (map_size - gy) / 10000
+                
+                st.write(f"GPS: X: {gps_x:.2f} Y: {gps_y:.2f}")
                 st.write(f"Game: {gx:.0f} / {gy:.0f}")
+                
                 m_type = st.selectbox("Type", list(MARKER_ICONS.keys()))
                 m_label = st.text_input("Label")
                 if st.button("Save"):
