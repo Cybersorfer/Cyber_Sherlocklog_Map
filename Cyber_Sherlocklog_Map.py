@@ -5,24 +5,18 @@ import pandas as pd
 from PIL import Image
 from datetime import datetime
 
-# --- 1. CONFIGURATION & LOCKED CALIBRATION ---
+# --- 1. CONFIGURATION & LOCKED SETTINGS ---
 st.set_page_config(layout="wide", page_title="DayZ Intel Mapper")
 
-# 🔒 HARDCODED WINNING SETTINGS (Hidden from UI)
+# 🔒 HARDCODED WINNING NUMBERS (No Sliders, No Menu)
 LOCKED_SETTINGS = {
-    # Map Image Alignment
     "img_off_x": 127,
     "img_off_y": 628,
     "img_scale": 1.04,
     "img_opacity": 1.0,
-    
-    # Log Data Alignment (From your screenshot)
     "log_off_x": 150,
     "log_off_y": 40,
-    
-    # Logic Defaults
-    "log_format": "Format: <X, Y, Z>", # Defaulting to the format that worked
-    "swap_xy": False,
+    "log_format": "Format: <X, Y, Z>", # Your verified format
     "show_grid": True,
     "show_towns": True
 }
@@ -146,9 +140,7 @@ def parse_poi_csv(uploaded_csv):
 
 # --- 3. COORDINATE MATH ---
 def transform_coords(game_x, game_y, settings):
-    final_x = game_y if settings['swap_xy'] else game_x
-    final_y = game_x if settings['swap_xy'] else game_y
-    return final_x, final_y
+    return game_x, game_y
 
 # --- 4. RENDER ENGINE ---
 def render_map(df, map_name, settings, search_term, active_layers, poi_db):
@@ -231,16 +223,8 @@ def render_map(df, map_name, settings, search_term, active_layers, poi_db):
     # D. PLAYERS (LOGS)
     if not df.empty:
         raw_x = df["raw_1"]
-        # Use our locked logic preference
-        if settings['log_format'] == "Format: <X, Y, Z>":
-            raw_y = df["raw_2"] 
-            adm_display_x = df["raw_1"]
-            adm_display_y = df["raw_2"]
-        else:
-            raw_y = df["raw_3"] 
-            adm_display_x = df["raw_1"]
-            adm_display_y = df["raw_3"]
-            
+        raw_y = df["raw_2"] # LOCKED to Format <X, Y, Z>
+        
         fx, fy = transform_coords(raw_x, raw_y, settings)
         
         # Apply Locked Log Offset
@@ -253,7 +237,7 @@ def render_map(df, map_name, settings, search_term, active_layers, poi_db):
             if not df_plot.empty:
                 # Re-calculate subsets for safe indexing
                 p_x = df_plot["raw_1"]
-                p_y = df_plot["raw_2"] if settings['log_format'] == "Format: <X, Y, Z>" else df_plot["raw_3"]
+                p_y = df_plot["raw_2"]
                 p_fx, p_fy = transform_coords(p_x, p_y, settings)
                 p_fx = p_fx + settings['log_off_x']
                 p_fy = p_fy + settings['log_off_y']
@@ -274,7 +258,7 @@ def render_map(df, map_name, settings, search_term, active_layers, poi_db):
                 x=fx, y=fy, mode='text',
                 text=df["icon"],
                 textfont=dict(size=14),
-                customdata=list(zip(df["time_str"], df["name"], adm_display_x, adm_display_y)),
+                customdata=list(zip(df["time_str"], df["name"], raw_x, raw_y)),
                 hovertemplate="<b>%{customdata[0]}</b><br>Player: %{customdata[1]}<br>ADM: %{customdata[2]:.1f} / %{customdata[3]:.1f}<extra></extra>",
                 name="Logs"
             ))
@@ -287,15 +271,17 @@ def render_map(df, map_name, settings, search_term, active_layers, poi_db):
     for i in range(16): 
         grid_vals_y.append(i * 1000); grid_text_y.append(f"{15-i:02d}")
 
-    # F. LAYOUT (Optimized margins & Click disabled)
+    # F. LAYOUT (Cleaned Up)
     fig.update_layout(
         height=900,
-        # Increased Top Margin to 80px to push toolbar away from grid
+        # Massive Top Margin to clear the toolbar
         margin={"l": 40, "r": 40, "t": 80, "b": 40}, 
         plot_bgcolor="#0e1117", paper_bgcolor="#0e1117",
         dragmode="pan", 
-        hovermode="closest", showlegend=True,
-        legend=dict(yanchor="top", y=0.95, xanchor="right", x=0.99, bgcolor="rgba(0,0,0,0.6)", font=dict(color="white")),
+        hovermode="closest", 
+        showlegend=True,
+        # Moved Legend to Bottom Left to stop overlapping map data
+        legend=dict(yanchor="bottom", y=0.01, xanchor="left", x=0.01, bgcolor="rgba(0,0,0,0.6)", font=dict(color="white")),
         
         xaxis=dict(
             visible=True, range=[0, map_size], side="top",
@@ -316,42 +302,31 @@ def render_map(df, map_name, settings, search_term, active_layers, poi_db):
 
 # --- 5. UI MAIN ---
 def main():
-    # CSS HACKS to hide Header & Menu
+    # AGGRESSIVE CSS to hide Streamlit UI elements
     st.markdown("""
     <style>
         .stApp { background-color: #0e1117; color: #fafafa; }
         [data-testid="stSidebar"] { background-color: #262730; }
-        [data-testid="stSidebar"] * { color: #cccccc !important; }
         
-        /* FORCE HIDE HEADER */
-        header[data-testid="stHeader"] { 
-            visibility: hidden !important; 
-            height: 0px !important; 
-        }
-        
-        /* Remove top padding caused by hidden header */
-        .block-container { 
-            padding-top: 0rem !important; 
-            padding-bottom: 1rem !important;
-        }
-        
-        /* Hide Main Menu (Hamburger) and Footer */
+        /* KILL THE WHITE HEADER & MENU */
+        header { visibility: hidden !important; height: 0px !important; }
         #MainMenu { visibility: hidden !important; }
         footer { visibility: hidden !important; }
         
-        /* Hide Decoration bar */
-        [data-testid="stDecoration"] { visibility: hidden !important; height: 0px !important; }
+        /* Push content up to fill the void */
+        .block-container { 
+            padding-top: 0rem !important; 
+            padding-bottom: 0rem !important; 
+        }
     </style>
     """, unsafe_allow_html=True)
 
     with st.sidebar:
         st.title("🗺️ Intel Control")
         selected_map = st.selectbox("Map", list(MAP_CONFIG.keys()))
-        
         st.write("---")
         uploaded_log = st.file_uploader("1. Upload Logs", type=['adm', 'rpt', 'log'])
-        
-        st.caption("ℹ️ **Upload POI DB**: Optional. CSV file for permanent markers like Bases or Trader Zones.")
+        st.caption("ℹ️ **Upload POI DB**: Optional CSV for permanent bases/traders.")
         uploaded_csv = st.file_uploader("2. Upload POI DB", type=['csv'])
         
         if uploaded_csv:
@@ -380,14 +355,14 @@ def main():
         
         search_term = st.text_input("Search", placeholder="Player...")
         
-    col1, col2 = st.columns([0.95, 0.05])
+    col1, col2 = st.columns([0.98, 0.02])
     with col1: 
         st.subheader(f"📍 {selected_map}")
     
-    # Render with LOCKED settings
+    # Render map (No sliders, no calibration passed)
     fig, map_size = render_map(df, selected_map, LOCKED_SETTINGS, search_term, active_layers, current_db)
 
-    # Display Chart (Interactions DISABLED - No "on_select" or "selection_mode")
+    # PURE VIEWER MODE: No 'on_select', no 'selection_mode'
     st.plotly_chart(
         fig, 
         use_container_width=True,
@@ -395,8 +370,8 @@ def main():
             'scrollZoom': True, 
             'displayModeBar': True, 
             'displaylogo': False,
-            # Remove tools that cause reloads
-            'modeBarButtonsToRemove': ['select2d', 'lasso2d', 'autoScale2d']
+            # Remove tools that might trigger weird states
+            'modeBarButtonsToRemove': ['select2d', 'lasso2d', 'autoScale2d', 'resetScale2d']
         }
     )
 
