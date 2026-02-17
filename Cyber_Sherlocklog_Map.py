@@ -8,13 +8,13 @@ from datetime import datetime
 # --- 1. CONFIGURATION & SAVED CALIBRATION ---
 st.set_page_config(layout="wide", page_title="DayZ Intel Mapper")
 
-# ⚠️ FINAL CALCULATED CALIBRATION (Matches iZurvive Coordinates)
+# ⚠️ FINAL CALIBRATION (Matches iZurvive)
 DEFAULT_CALIBRATION = {
-    "img_off_x": 127,   # Shifted Right to match iZurvive X (7464)
-    "img_off_y": 628,   # Lowered to match iZurvive Y (7682)
-    "img_scale": 1.04,  # Locked Scale
-    "target_x": 7464,   # Real iZurvive Coordinate (Novy Sobor SE)
-    "target_y": 7682    # Real iZurvive Coordinate
+    "img_off_x": 127,   
+    "img_off_y": 628,   
+    "img_scale": 1.04,  
+    "target_x": 7464,   
+    "target_y": 7682    
 }
 
 MAP_CONFIG = {
@@ -143,7 +143,6 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
         img_width = map_size * settings['img_scale']
         img_height = map_size * settings['img_scale']
         img_x = settings['img_off_x']
-        # The Top-Left of image is determined here.
         img_y = map_size + settings['img_off_y'] 
         
         fig.add_layout_image(
@@ -247,7 +246,7 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
             name="Custom", hoverinfo="text", hovertext=[m['label'] for m in custom_markers]
         ))
 
-    # H. PLAYERS
+    # H. PLAYERS (Logs)
     if not df.empty:
         raw_x = df["raw_1"]
         raw_y = df["raw_3"] if settings['use_z_as_height'] else df["raw_2"]
@@ -261,7 +260,7 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
             sizes = [15 if m else 5 for m in mask]
 
         fig.add_trace(go.Scatter(
-            x=fx, y=fz, mode='markers',
+            x=fx, y=fy, mode='markers', # FIX: Changed fz to fy here
             marker=dict(size=sizes, color=colors, line=dict(width=1, color='white')),
             text=df["name"], customdata=df["activity"],
             hovertemplate="<b>%{text}</b><br>Game: %{x:.0f} / %{y:.0f}<br>%{customdata}<extra></extra>",
@@ -365,10 +364,10 @@ def main():
 
             with st.expander("🖼️ Map Image", expanded=True):
                 st.info("Align map to Target.")
-                # 'final_7' keys to force refresh
-                img_off_x = st.slider("Image X", -2000, 2000, DEFAULT_CALIBRATION['img_off_x'], 10, key="cal_img_x_final_7") 
-                img_off_y = st.slider("Image Y", -2000, 2000, DEFAULT_CALIBRATION['img_off_y'], 10, key="cal_img_y_final_7") 
-                img_scale = st.slider("Image Scale", 0.8, 1.2, DEFAULT_CALIBRATION['img_scale'], 0.001, key="cal_img_scale_final_7") 
+                # 'final_8' keys to force refresh
+                img_off_x = st.slider("Image X", -2000, 2000, DEFAULT_CALIBRATION['img_off_x'], 10, key="cal_img_x_final_8") 
+                img_off_y = st.slider("Image Y", -2000, 2000, DEFAULT_CALIBRATION['img_off_y'], 10, key="cal_img_y_final_8") 
+                img_scale = st.slider("Image Scale", 0.8, 1.2, DEFAULT_CALIBRATION['img_scale'], 0.001, key="cal_img_scale_final_8") 
                 img_opacity = st.slider("Opacity", 0.1, 1.0, 1.0, 0.1)
 
             with st.expander("⚙️ Settings", expanded=False):
