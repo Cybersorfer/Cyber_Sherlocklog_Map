@@ -8,10 +8,10 @@ from datetime import datetime
 # --- 1. CONFIGURATION & SAVED CALIBRATION ---
 st.set_page_config(layout="wide", page_title="DayZ Intel Mapper")
 
-# ⚠️ UPDATED WINNING NUMBERS (Map Pulled UP)
+# ⚠️ UPDATED WINNING NUMBERS (Map Pulled UP +300m)
 DEFAULT_CALIBRATION = {
-    "img_off_x": -50,   # Adjusted slightly Right
-    "img_off_y": 200,   # Changed from -300 to 200 (Moves map UP ~500m)
+    "img_off_x": 0,     # Adjusted slightly Right (was -50)
+    "img_off_y": 500,   # Adjusted UP (was 200)
     "img_scale": 1.04,  
     "target_x": 7441,   
     "target_y": 7043    
@@ -361,10 +361,10 @@ def main():
 
             with st.expander("🖼️ Map Image", expanded=True):
                 st.info("Align map to Target.")
-                # Added "final" suffix to keys to ensure slider reset
-                img_off_x = st.slider("Image X", -2000, 2000, DEFAULT_CALIBRATION['img_off_x'], 10, key="cal_img_x_final") 
-                img_off_y = st.slider("Image Y", -2000, 2000, DEFAULT_CALIBRATION['img_off_y'], 10, key="cal_img_y_final") 
-                img_scale = st.slider("Image Scale", 0.8, 1.2, DEFAULT_CALIBRATION['img_scale'], 0.001, key="cal_img_scale_final") 
+                # Added 'final_2' to keys to force refresh
+                img_off_x = st.slider("Image X", -2000, 2000, DEFAULT_CALIBRATION['img_off_x'], 10, key="cal_img_x_final_2") 
+                img_off_y = st.slider("Image Y", -2000, 2000, DEFAULT_CALIBRATION['img_off_y'], 10, key="cal_img_y_final_2") 
+                img_scale = st.slider("Image Scale", 0.8, 1.2, DEFAULT_CALIBRATION['img_scale'], 0.001, key="cal_img_scale_final_2") 
                 img_opacity = st.slider("Opacity", 0.1, 1.0, 1.0, 0.1)
 
             with st.expander("⚙️ Settings", expanded=False):
