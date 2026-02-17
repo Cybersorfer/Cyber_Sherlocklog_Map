@@ -8,13 +8,13 @@ from datetime import datetime
 # --- 1. CONFIGURATION & SAVED CALIBRATION ---
 st.set_page_config(layout="wide", page_title="DayZ Intel Mapper")
 
-# ⚠️ UPDATED WINNING NUMBERS (Scale 1.04 | Position Lifted UP)
+# ⚠️ FINAL CALCULATED CALIBRATION (Matches iZurvive Coordinates)
 DEFAULT_CALIBRATION = {
-    "img_off_x": 0,     
-    "img_off_y": 850,   # Raised to 850 (Moves map UP significantly)
-    "img_scale": 1.04,  # LOCKED at 1.04 as requested
-    "target_x": 7441,   
-    "target_y": 7043    
+    "img_off_x": 127,   # Shifted Right to match iZurvive X (7464)
+    "img_off_y": 628,   # Lowered to match iZurvive Y (7682)
+    "img_scale": 1.04,  # Locked Scale
+    "target_x": 7464,   # Real iZurvive Coordinate (Novy Sobor SE)
+    "target_y": 7682    # Real iZurvive Coordinate
 }
 
 MAP_CONFIG = {
@@ -365,10 +365,10 @@ def main():
 
             with st.expander("🖼️ Map Image", expanded=True):
                 st.info("Align map to Target.")
-                # 'final_6' keys to force refresh
-                img_off_x = st.slider("Image X", -2000, 2000, DEFAULT_CALIBRATION['img_off_x'], 10, key="cal_img_x_final_6") 
-                img_off_y = st.slider("Image Y", -2000, 2000, DEFAULT_CALIBRATION['img_off_y'], 10, key="cal_img_y_final_6") 
-                img_scale = st.slider("Image Scale", 0.8, 1.2, DEFAULT_CALIBRATION['img_scale'], 0.001, key="cal_img_scale_final_6") 
+                # 'final_7' keys to force refresh
+                img_off_x = st.slider("Image X", -2000, 2000, DEFAULT_CALIBRATION['img_off_x'], 10, key="cal_img_x_final_7") 
+                img_off_y = st.slider("Image Y", -2000, 2000, DEFAULT_CALIBRATION['img_off_y'], 10, key="cal_img_y_final_7") 
+                img_scale = st.slider("Image Scale", 0.8, 1.2, DEFAULT_CALIBRATION['img_scale'], 0.001, key="cal_img_scale_final_7") 
                 img_opacity = st.slider("Opacity", 0.1, 1.0, 1.0, 0.1)
 
             with st.expander("⚙️ Settings", expanded=False):
