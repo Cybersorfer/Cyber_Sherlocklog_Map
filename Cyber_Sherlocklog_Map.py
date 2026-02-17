@@ -15,7 +15,6 @@ MAP_CONFIG = {
 }
 
 # --- DATABASE (Standard DayZ Coordinates: X, Y) ---
-# Note: In DayZ code these are often X, Z. But for iZurvive/Map consistency we call them X, Y.
 TOWN_DATA = {
     "Chernarus": [
         {"name": "NWAF", "x": 4600, "y": 10200},
@@ -119,9 +118,6 @@ def parse_poi_csv(uploaded_csv):
 
 # --- 3. COORDINATE MATH (Native Cartesian) ---
 def transform_coords(game_x, game_y, settings):
-    """
-    Direct mapping. Game X -> Plot X. Game Y -> Plot Y.
-    """
     final_x = game_y if settings['swap_xy'] else game_x
     final_y = game_x if settings['swap_xy'] else game_y
     return final_x, final_y
@@ -129,7 +125,6 @@ def transform_coords(game_x, game_y, settings):
 def reverse_transform(plot_x, plot_y, settings):
     game_x = plot_x
     game_y = plot_y
-    
     if settings['swap_xy']:
         return game_y, game_x
     return game_x, game_y
@@ -141,8 +136,7 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
     fig = go.Figure()
 
     # A. SENSOR LAYER (Invisible Heatmap for Hover Coordinates)
-    # We construct a custom hovertemplate to match the user's screenshot format.
-    # GPS logic: value / 10000 (e.g., 7500 -> 0.75)
+    # We display Game coordinates and basic GPS approximation (Coord / 10000)
     fig.add_trace(go.Heatmap(
         z=[[0, 0], [0, 0]], 
         x=[0, map_size], 
@@ -150,18 +144,7 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
         opacity=0, 
         showscale=False,
         hoverinfo="none", 
-        hovertemplate=(
-            "<b>Coordinates</b><br>" +
-            "GPS: X: %{x:.2f} Y: %{y:.2f}<br>" +  # Normalized for display logic handled below? No, Plotly standard.
-            # actually we need customformatting in the hovertemplate string which is hard for dynamic calculation
-            # standard hack: We display raw / 10000 in the next update or just rely on raw now.
-            # simpler: Just show the Raw Game coords and let user infer GPS or...
-            # The user wants "GPS: X: 0.75". 
-            # We can't do math inside the plotly hover string easily without customdata.
-            # But for a background heatmap, we only have x/y.
-            # workaround: We will just show Game coords clearly matching the bottom half of their screenshot.
-            "Game: %{x:.0f} / %{y:.0f}<extra></extra>"
-        )
+        hovertemplate="Game: %{x:.0f} / %{y:.0f}<extra></extra>"
     ))
 
     # B. IMAGE LAYER (Background)
@@ -169,8 +152,6 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
     if img:
         img_width = map_size * settings['img_scale']
         img_height = map_size * settings['img_scale']
-        
-        # Image Y position logic (Top Anchor)
         img_x = settings['img_off_x']
         img_y = map_size + settings['img_off_y'] 
         
@@ -253,11 +234,7 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
     # G. PLAYERS (Logs)
     if not df.empty:
         raw_x = df["raw_1"]
-        # Use col 3 as Y if Ocean Fix is on (Standard <x, z, y> or <x, y, z>)
-        # Standard DayZ Log: <X, Z, Y> (Y is height). So Map Y is actually Log Z (col 2).
-        # But if user says "Fix Ocean", they imply the columns are swapped.
         raw_y = df["raw_3"] if settings['use_z_as_height'] else df["raw_2"]
-        
         fx, fy = transform_coords(raw_x, raw_y, settings)
         
         colors = ['red'] * len(df)
@@ -275,12 +252,25 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
             name="Logs"
         ))
 
-    # H. RULERS (00 - 15)
-    grid_vals = []
-    grid_text = []
-    for i in range(17): # 0 to 16
-        grid_vals.append(i * 1000)
-        grid_text.append(f"{i:02d}")
+    # H. RULERS GENERATION
+    # X Axis (West to East): 00 -> 15
+    grid_vals_x = []
+    grid_text_x = []
+    for i in range(17): 
+        grid_vals_x.append(i * 1000)
+        grid_text_x.append(f"{i:02d}")
+
+    # Y Axis (South to North): 15 -> 00
+    # In Cartesian: 0 is Bottom (South), 15000 is Top (North).
+    # iZurvive Ruler: Bottom is 15, Top is 00.
+    # So we must REVERSE the labels for the Y axis relative to the values.
+    grid_vals_y = []
+    grid_text_y = []
+    for i in range(17): 
+        grid_vals_y.append(i * 1000)      # 0, 1000, 2000...
+        # If i=0 (Bottom), we want label "15" (or "16" if map is huge, but usually 0-15)
+        # 15 - 0 = 15. 15 - 15 = 00.
+        grid_text_y.append(f"{15-i:02d}") # 15, 14, 13... 00
 
     # I. LAYOUT
     fig.update_layout(
@@ -292,7 +282,7 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
         showlegend=True,
         legend=dict(yanchor="top", y=0.95, xanchor="right", x=0.99, bgcolor="rgba(0,0,0,0.6)", font=dict(color="white")),
         
-        # --- X AXIS (00 - 15 West to East) ---
+        # --- X AXIS (00 -> 15) ---
         xaxis=dict(
             visible=True,
             range=[-500, map_size + 500],
@@ -301,13 +291,13 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
             gridcolor="rgba(255, 255, 255, 0.2)",
             gridwidth=1,
             tickmode="array",
-            tickvals=grid_vals,
-            ticktext=grid_text,
+            tickvals=grid_vals_x,
+            ticktext=grid_text_x,
             tickfont=dict(color="white", size=14, family="Arial Black"),
             zeroline=False
         ),
 
-        # --- Y AXIS (00 - 15 South to North) ---
+        # --- Y AXIS (15 -> 00) ---
         yaxis=dict(
             visible=True,
             range=[-500, map_size + 500], 
@@ -316,8 +306,8 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
             gridcolor="rgba(255, 255, 255, 0.2)",
             gridwidth=1,
             tickmode="array",
-            tickvals=grid_vals,
-            ticktext=grid_text,
+            tickvals=grid_vals_y,
+            ticktext=grid_text_y, # REVERSED LABELS
             tickfont=dict(color="white", size=14, family="Arial Black"),
             scaleanchor="x",
             scaleratio=1,
@@ -376,15 +366,12 @@ def main():
         st.subheader("🔧 Calibration")
 
         with st.form("calibration_form"):
-            # 1. Calibration Target
             with st.expander("🎯 Calibration Target", expanded=True):
                 st.caption("Enter Game Coordinates (X / Y).")
                 show_target = st.checkbox("Show Target", value=True)
-                # Updated Labels to X and Y
-                target_x = st.number_input("Target X (West-East)", value=7550, step=10)
-                target_y = st.number_input("Target Y (South-North)", value=7812, step=10)
+                target_x = st.number_input("Target X", value=7550, step=10)
+                target_y = st.number_input("Target Y", value=7812, step=10)
 
-            # 2. Map Image Calibration
             with st.expander("🖼️ Map Image (Background)", expanded=True):
                 st.info("Align the map so the landmark matches the Target.")
                 img_off_x = st.slider("Image X", -2000, 2000, -200, 10) 
@@ -392,7 +379,6 @@ def main():
                 img_scale = st.slider("Image Scale", 0.8, 1.2, 1.05, 0.001) 
                 img_opacity = st.slider("Opacity", 0.1, 1.0, 1.0, 0.1)
 
-            # 3. Logic Settings
             with st.expander("⚙️ Settings", expanded=False):
                 use_z_as_height = st.checkbox("Fix Ocean (Log Y=Height)", True)
                 swap_xy = st.checkbox("Swap X/Y Inputs", False)
@@ -416,17 +402,10 @@ def main():
     col1, col2 = st.columns([0.85, 0.15])
     with col1: 
         st.subheader(f"📍 {selected_map}")
-        # Custom JS hack to emulate the "GPS" display in the title since Plotly hover is strictly context-based
-        # For now, we rely on the Plotly hover tooltip.
         st.caption("ℹ️ Hover to see GPS & Game Coordinates.")
     
     fig, map_size = render_map(df, selected_map, settings, search_term, st.session_state['custom_markers'], active_layers, current_db, cal_target)
 
-    # We patch the figure to try and force the hover template to calculate GPS
-    # Note: Pure Python Plotly can't do math in hovertemplate easily. 
-    # But we can update the heatmap to use a custom array if we really wanted to.
-    # For now, the "Game" coords are accurate.
-    
     event = st.plotly_chart(
         fig, on_select="rerun", selection_mode="points", use_container_width=True,
         config={'scrollZoom': True, 'displayModeBar': True, 'modeBarButtonsToAdd': ['zoomIn2d', 'zoomOut2d', 'resetScale2d', 'pan2d'], 'displaylogo': False}
@@ -438,7 +417,10 @@ def main():
             gx, gy = reverse_transform(p['x'], p['y'], settings)
             @st.dialog("Add Marker")
             def add_marker_dialog():
-                st.write(f"Game Coords: {gx:.0f} / {gy:.0f}")
+                gps_x = gx / 10000
+                gps_y = gy / 10000
+                st.write(f"GPS: {gps_x:.2f} / {gps_y:.2f}")
+                st.write(f"Game: {gx:.0f} / {gy:.0f}")
                 m_type = st.selectbox("Type", list(MARKER_ICONS.keys()))
                 m_label = st.text_input("Label")
                 if st.button("Save"):
