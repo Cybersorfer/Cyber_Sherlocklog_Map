@@ -80,6 +80,7 @@ def parse_log_file_content(content_bytes):
     logs = []
     content = content_bytes.decode("utf-8", errors='ignore')
     lines = content.split('\n')
+    # Regex to grab the 3 numbers inside <...>
     coord_pattern = re.compile(r"<([0-9\.-]+),\s*([0-9\.-]+),\s*([0-9\.-]+)>")
     name_pattern = re.compile(r'(?:Player|Identity)\s+"([^"]+)"')
     time_pattern = re.compile(r'^(\d{2}:\d{2}:\d{2})')
@@ -99,7 +100,9 @@ def parse_log_file_content(content_bytes):
             
             logs.append({
                 "time_obj": log_time, "name": name,
-                "raw_1": float(v1), "raw_2": float(v2), "raw_3": float(v3),
+                "raw_1": float(v1), # X
+                "raw_2": float(v2), # Usually Height (Z in math)
+                "raw_3": float(v3), # Usually North (Y in math)
                 "activity": line.strip()[:150] 
             })
     return pd.DataFrame(logs)
@@ -147,8 +150,7 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
         
         fig.add_layout_image(
             dict(
-                source=img,
-                xref="x", yref="y",
+                source=img, xref="x", yref="y",
                 x=img_x, y=img_y,
                 sizex=img_width, sizey=img_height,
                 sizing="stretch", opacity=settings['img_opacity'],
@@ -172,11 +174,9 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
             grid_y.extend([pos, pos, None])
 
         fig.add_trace(go.Scatter(
-            x=grid_x, y=grid_y,
-            mode='lines',
+            x=grid_x, y=grid_y, mode='lines',
             line=dict(color='rgba(255, 255, 255, 0.2)', width=1),
-            hoverinfo='skip',
-            name='Grid'
+            hoverinfo='skip', name='Grid'
         ))
 
     # C. SENSOR LAYER
@@ -246,10 +246,12 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
             name="Custom", hoverinfo="text", hovertext=[m['label'] for m in custom_markers]
         ))
 
-    # H. PLAYERS (Logs)
+    # H. PLAYERS (LOGIC FIX: Default to Col 3 for Y)
     if not df.empty:
         raw_x = df["raw_1"]
-        raw_y = df["raw_3"] if settings['use_z_as_height'] else df["raw_2"]
+        # FIX: The checkbox now toggles between Col 3 (Default/Correct) and Col 2 (Wrong/Height)
+        # If 'use_col_3_as_y' is True, we use raw_3.
+        raw_y = df["raw_3"] if settings['use_col_3_as_y'] else df["raw_2"]
         fx, fy = transform_coords(raw_x, raw_y, settings)
         
         colors = ['red'] * len(df)
@@ -260,7 +262,7 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
             sizes = [15 if m else 5 for m in mask]
 
         fig.add_trace(go.Scatter(
-            x=fx, y=fy, mode='markers', # FIX: Changed fz to fy here
+            x=fx, y=fy, mode='markers',
             marker=dict(size=sizes, color=colors, line=dict(width=1, color='white')),
             text=df["name"], customdata=df["activity"],
             hovertemplate="<b>%{text}</b><br>Game: %{x:.0f} / %{y:.0f}<br>%{customdata}<extra></extra>",
@@ -364,14 +366,14 @@ def main():
 
             with st.expander("🖼️ Map Image", expanded=True):
                 st.info("Align map to Target.")
-                # 'final_8' keys to force refresh
-                img_off_x = st.slider("Image X", -2000, 2000, DEFAULT_CALIBRATION['img_off_x'], 10, key="cal_img_x_final_8") 
-                img_off_y = st.slider("Image Y", -2000, 2000, DEFAULT_CALIBRATION['img_off_y'], 10, key="cal_img_y_final_8") 
-                img_scale = st.slider("Image Scale", 0.8, 1.2, DEFAULT_CALIBRATION['img_scale'], 0.001, key="cal_img_scale_final_8") 
+                img_off_x = st.slider("Image X", -2000, 2000, DEFAULT_CALIBRATION['img_off_x'], 10, key="cal_img_x_final_9") 
+                img_off_y = st.slider("Image Y", -2000, 2000, DEFAULT_CALIBRATION['img_off_y'], 10, key="cal_img_y_final_9") 
+                img_scale = st.slider("Image Scale", 0.8, 1.2, DEFAULT_CALIBRATION['img_scale'], 0.001, key="cal_img_scale_final_9") 
                 img_opacity = st.slider("Opacity", 0.1, 1.0, 1.0, 0.1)
 
             with st.expander("⚙️ Settings", expanded=False):
-                use_z_as_height = st.checkbox("Fix Ocean (Log Y=Height)", True)
+                # RENAMED and DEFAULTED TO TRUE for correct behavior
+                use_col_3_as_y = st.checkbox("Use 3rd Value as North/South (Default)", True, help="Uncheck if dots are stuck at bottom.")
                 swap_xy = st.checkbox("Swap X/Y Inputs", False)
                 show_grid = st.checkbox("Show Grid (0-15)", True)
                 show_towns = st.checkbox("Show Towns", True)
@@ -380,7 +382,7 @@ def main():
             
         settings = {
             "img_off_x": img_off_x, "img_off_y": img_off_y, "img_scale": img_scale, "img_opacity": img_opacity,
-            "use_z_as_height": use_z_as_height, "swap_xy": swap_xy, 
+            "use_col_3_as_y": use_col_3_as_y, "swap_xy": swap_xy, 
             "click_mode": click_mode, "show_grid": show_grid, "show_towns": show_towns
         }
         
