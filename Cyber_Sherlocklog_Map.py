@@ -8,7 +8,7 @@ from datetime import datetime
 # --- 1. CONFIGURATION & SAVED CALIBRATION ---
 st.set_page_config(layout="wide", page_title="DayZ Intel Mapper")
 
-# ⚠️ UPDATED WINNING NUMBERS (Map Pulled UP +300m)
+# ⚠️ UPDATED WINNING NUMBERS (Grid Locked)
 DEFAULT_CALIBRATION = {
     "img_off_x": 0,     
     "img_off_y": 500,   
@@ -80,7 +80,6 @@ def parse_log_file_content(content_bytes):
     logs = []
     content = content_bytes.decode("utf-8", errors='ignore')
     lines = content.split('\n')
-    
     coord_pattern = re.compile(r"<([0-9\.-]+),\s*([0-9\.-]+),\s*([0-9\.-]+)>")
     name_pattern = re.compile(r'(?:Player|Identity)\s+"([^"]+)"')
     time_pattern = re.compile(r'^(\d{2}:\d{2}:\d{2})')
@@ -91,7 +90,6 @@ def parse_log_file_content(content_bytes):
             v1, v2, v3 = coord_match.groups()
             name_match = name_pattern.search(line)
             time_match = time_pattern.search(line)
-            
             name = name_match.group(1) if name_match else "Unknown"
             log_time = None
             if time_match:
@@ -100,8 +98,7 @@ def parse_log_file_content(content_bytes):
                 except: pass
             
             logs.append({
-                "time_obj": log_time,
-                "name": name,
+                "time_obj": log_time, "name": name,
                 "raw_1": float(v1), "raw_2": float(v2), "raw_3": float(v3),
                 "activity": line.strip()[:150] 
             })
@@ -117,9 +114,7 @@ def parse_poi_csv(uploaded_csv):
             cat = row['category']
             if m_name not in new_db: new_db[m_name] = {}
             if cat not in new_db[m_name]: new_db[m_name][cat] = []
-            new_db[m_name][cat].append({
-                "name": row['name'], "x": float(row['x']), "y": float(row['y'])
-            })
+            new_db[m_name][cat].append({"name": row['name'], "x": float(row['x']), "y": float(row['y'])})
         return new_db
     except Exception:
         return DEFAULT_POI_DATABASE
@@ -133,8 +128,7 @@ def transform_coords(game_x, game_y, settings):
 def reverse_transform(plot_x, plot_y, settings):
     game_x = plot_x
     game_y = plot_y
-    if settings['swap_xy']:
-        return game_y, game_x
+    if settings['swap_xy']: return game_y, game_x
     return game_x, game_y
 
 # --- 4. RENDER ENGINE ---
@@ -143,52 +137,55 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
     map_size = config["size"]
     fig = go.Figure()
 
-    # A. IMAGE LAYER (FIX: Now rendered as a TRACE, not Layout Image)
-    # This locks the image to the coordinate system completely.
+    # A. IMAGE LAYER (Background)
     img = load_map_image(config["image"])
     if img:
         img_width = map_size * settings['img_scale']
         img_height = map_size * settings['img_scale']
+        # Apply Calibration Offsets
         img_x = settings['img_off_x']
         img_y = map_size + settings['img_off_y'] 
-        
-        # Calculate bounds for Image Trace
-        # Left, Right, Bottom, Top
-        # Note: Plotly Image trace draws from Top-Left (x0, y0) to Bottom-Right (x1, y1)
-        # But we need to be careful with coordinate systems.
-        # We use layout_image for background usually, but to LOCK IT we need it to scale.
-        # Actually, layout_image DOES scale if sizing="stretch" and matches axis.
-        # The issue you had was "layer=below" and fixed axis ranges.
-        # We will use layout_image but bind it to "x" and "y" axes explicitly.
         
         fig.add_layout_image(
             dict(
                 source=img,
-                xref="x", yref="y", # Binds to the zoomable axes
-                x=img_x,        
-                y=img_y,        
-                sizex=img_width,
-                sizey=img_height,
-                sizing="stretch",
-                opacity=settings['img_opacity'],
+                xref="x", yref="y",
+                x=img_x, y=img_y,
+                sizex=img_width, sizey=img_height,
+                sizing="stretch", opacity=settings['img_opacity'],
                 layer="below"
             )
         )
     else:
         fig.add_shape(type="rect", x0=0, y0=0, x1=map_size, y1=map_size, line=dict(color="RoyalBlue"))
 
-    # B. SENSOR LAYER (Invisible Heatmap for Hover)
+    # B. PHYSICAL GRID LINES (The Fix)
+    # Instead of relying on Axis Grid, we draw literal lines on the map.
+    # Vertical Lines (X)
+    if settings['show_grid']:
+        for i in range(1, 16): # 1 to 15 (0 and 16 are edges)
+            pos = i * 1000
+            # Draw Vertical Line
+            fig.add_shape(
+                type="line", x0=pos, y0=0, x1=pos, y1=map_size,
+                line=dict(color="rgba(255, 255, 255, 0.15)", width=1),
+                layer="above" # Draws ON TOP of the image
+            )
+            # Draw Horizontal Line
+            fig.add_shape(
+                type="line", x0=0, y0=pos, x1=map_size, y1=pos,
+                line=dict(color="rgba(255, 255, 255, 0.15)", width=1),
+                layer="above"
+            )
+
+    # C. SENSOR LAYER (Invisible Heatmap)
     fig.add_trace(go.Heatmap(
-        z=[[0, 0], [0, 0]], 
-        x=[0, map_size], 
-        y=[0, map_size],
-        opacity=0, 
-        showscale=False,
-        hoverinfo="none", 
+        z=[[0, 0], [0, 0]], x=[0, map_size], y=[0, map_size],
+        opacity=0, showscale=False, hoverinfo="none", 
         hovertemplate="<extra></extra>"
     ))
 
-    # C. CALIBRATION TARGET
+    # D. CALIBRATION TARGET
     if cal_target['active']:
         tx, ty = transform_coords(cal_target['x'], cal_target['y'], settings)
         fig.add_trace(go.Scatter(
@@ -200,7 +197,7 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
             name="Calibration Target"
         ))
 
-    # D. TOWNS
+    # E. TOWNS
     if settings['show_towns'] and map_name in TOWN_DATA:
         t_x, t_y, t_names = [], [], []
         for town in TOWN_DATA[map_name]:
@@ -215,7 +212,7 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
             name="Towns"
         ))
 
-    # E. POI LAYERS
+    # F. POI LAYERS
     if map_name in poi_db:
         for layer_name, locations in poi_db[map_name].items():
             if layer_name in active_layers:
@@ -235,7 +232,7 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
                     hovertemplate="<b>%{text}</b><br>Game: %{x:.0f} / %{y:.0f}<extra></extra>"
                 ))
 
-    # F. CUSTOM MARKERS
+    # G. CUSTOM MARKERS
     if custom_markers:
         c_x, c_y, c_text = [], [], []
         for m in custom_markers:
@@ -248,7 +245,7 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
             name="Custom", hoverinfo="text", hovertext=[m['label'] for m in custom_markers]
         ))
 
-    # G. PLAYERS (Logs)
+    # H. PLAYERS (Logs)
     if not df.empty:
         raw_x = df["raw_1"]
         raw_y = df["raw_3"] if settings['use_z_as_height'] else df["raw_2"]
@@ -262,14 +259,14 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
             sizes = [15 if m else 5 for m in mask]
 
         fig.add_trace(go.Scatter(
-            x=fx, y=fz, mode='markers',
+            x=fx, y=fy, mode='markers',
             marker=dict(size=sizes, color=colors, line=dict(width=1, color='white')),
             text=df["name"], customdata=df["activity"],
             hovertemplate="<b>%{text}</b><br>Game: %{x:.0f} / %{y:.0f}<br>%{customdata}<extra></extra>",
             name="Logs"
         ))
 
-    # H. RULERS
+    # I. RULERS (Ticks only)
     grid_vals_x = []
     grid_text_x = []
     for i in range(16): 
@@ -282,40 +279,30 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
         grid_vals_y.append(i * 1000)      
         grid_text_y.append(f"{15-i:02d}")
 
-    # I. LAYOUT
+    # J. LAYOUT
     fig.update_layout(
         height=900,
         margin={"l": 40, "r": 40, "t": 40, "b": 40},
         plot_bgcolor="#0e1117", paper_bgcolor="#0e1117",
-        
-        # KEY FIX: This locks the zoom behavior
         dragmode="pan" if settings['click_mode'] == "Navigate" else False,
-        hovermode="closest", 
-        showlegend=True,
+        hovermode="closest", showlegend=True,
         legend=dict(yanchor="top", y=0.95, xanchor="right", x=0.99, bgcolor="rgba(0,0,0,0.6)", font=dict(color="white")),
         
-        # KEY FIX: "constrain: domain" ensures axes don't detach from the image
         xaxis=dict(
-            visible=True, 
-            range=[0, map_size], 
-            side="top",
-            showgrid=settings['show_grid'], gridcolor="rgba(255, 255, 255, 0.2)",
+            visible=True, range=[0, map_size], side="top",
+            showgrid=False, # We draw our own grid now!
+            gridcolor="rgba(0,0,0,0)", # Hidden native grid
             tickmode="array", tickvals=grid_vals_x, ticktext=grid_text_x,
-            tickfont=dict(color="white", size=14, family="Arial Black"), 
-            zeroline=False,
-            fixedrange=False # Allow Zoom
+            tickfont=dict(color="white", size=14, family="Arial Black"), zeroline=False
         ),
 
         yaxis=dict(
-            visible=True, 
-            range=[0, map_size], 
-            side="left",
-            showgrid=settings['show_grid'], gridcolor="rgba(255, 255, 255, 0.2)",
+            visible=True, range=[0, map_size], side="left",
+            showgrid=False, # We draw our own grid now!
+            gridcolor="rgba(0,0,0,0)", # Hidden native grid
             tickmode="array", tickvals=grid_vals_y, ticktext=grid_text_y,
             tickfont=dict(color="white", size=14, family="Arial Black"),
-            scaleanchor="x", scaleratio=1, # LOCKS ASPECT RATIO
-            zeroline=False,
-            fixedrange=False # Allow Zoom
+            scaleanchor="x", scaleratio=1, zeroline=False
         )
     )
     return fig, map_size
@@ -378,10 +365,10 @@ def main():
 
             with st.expander("🖼️ Map Image", expanded=True):
                 st.info("Align map to Target.")
-                # Added 'final_2' to keys to force refresh
-                img_off_x = st.slider("Image X", -2000, 2000, DEFAULT_CALIBRATION['img_off_x'], 10, key="cal_img_x_final_2") 
-                img_off_y = st.slider("Image Y", -2000, 2000, DEFAULT_CALIBRATION['img_off_y'], 10, key="cal_img_y_final_2") 
-                img_scale = st.slider("Image Scale", 0.8, 1.2, DEFAULT_CALIBRATION['img_scale'], 0.001, key="cal_img_scale_final_2") 
+                # Added 'final_3' to keys to force refresh
+                img_off_x = st.slider("Image X", -2000, 2000, DEFAULT_CALIBRATION['img_off_x'], 10, key="cal_img_x_final_3") 
+                img_off_y = st.slider("Image Y", -2000, 2000, DEFAULT_CALIBRATION['img_off_y'], 10, key="cal_img_y_final_3") 
+                img_scale = st.slider("Image Scale", 0.8, 1.2, DEFAULT_CALIBRATION['img_scale'], 0.001, key="cal_img_scale_final_3") 
                 img_opacity = st.slider("Opacity", 0.1, 1.0, 1.0, 0.1)
 
             with st.expander("⚙️ Settings", expanded=False):
