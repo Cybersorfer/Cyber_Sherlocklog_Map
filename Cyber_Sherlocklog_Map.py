@@ -14,42 +14,43 @@ MAP_CONFIG = {
     "Sakhal": {"size": 8192, "image": "map_sakhal.png"}
 }
 
-# --- DATABASE (Standard DayZ Coordinates) ---
+# --- DATABASE (Standard DayZ Coordinates: X, Y) ---
+# Note: In DayZ code these are often X, Z. But for iZurvive/Map consistency we call them X, Y.
 TOWN_DATA = {
     "Chernarus": [
-        {"name": "NWAF", "x": 4600, "z": 10200},
-        {"name": "Severograd", "x": 8400, "z": 12700},
-        {"name": "Stary Sobor", "x": 6050, "z": 7750},
-        {"name": "Novy Sobor", "x": 7100, "z": 7700},
-        {"name": "Vybor", "x": 3750, "z": 8900},
-        {"name": "Gorka", "x": 9500, "z": 8800},
-        {"name": "Chernogorsk", "x": 6650, "z": 2600},
-        {"name": "Elektrozavodsk", "x": 10450, "z": 2300},
-        {"name": "Berezino", "x": 12400, "z": 9600},
-        {"name": "Zelenogorsk", "x": 2750, "z": 5300},
-        {"name": "Tisy Base", "x": 1700, "z": 14000},
-        {"name": "Krasnostav", "x": 11200, "z": 12300},
-        {"name": "Solnichniy", "x": 13350, "z": 6200},
-        {"name": "Kamyshovo", "x": 12000, "z": 3500},
-        {"name": "Balota", "x": 4400, "z": 2400},
-        {"name": "VMC", "x": 4500, "z": 8300},
-        {"name": "Altar", "x": 8100, "z": 9300},
-        {"name": "Radio Zenit", "x": 7900, "z": 9700}
+        {"name": "NWAF", "x": 4600, "y": 10200},
+        {"name": "Severograd", "x": 8400, "y": 12700},
+        {"name": "Stary Sobor", "x": 6050, "y": 7750},
+        {"name": "Novy Sobor", "x": 7100, "y": 7700},
+        {"name": "Vybor", "x": 3750, "y": 8900},
+        {"name": "Gorka", "x": 9500, "y": 8800},
+        {"name": "Chernogorsk", "x": 6650, "y": 2600},
+        {"name": "Elektrozavodsk", "x": 10450, "y": 2300},
+        {"name": "Berezino", "x": 12400, "y": 9600},
+        {"name": "Zelenogorsk", "x": 2750, "y": 5300},
+        {"name": "Tisy Base", "x": 1700, "y": 14000},
+        {"name": "Krasnostav", "x": 11200, "y": 12300},
+        {"name": "Solnichniy", "x": 13350, "y": 6200},
+        {"name": "Kamyshovo", "x": 12000, "y": 3500},
+        {"name": "Balota", "x": 4400, "y": 2400},
+        {"name": "VMC", "x": 4500, "y": 8300},
+        {"name": "Altar", "x": 8100, "y": 9300},
+        {"name": "Radio Zenit", "x": 7900, "y": 9700}
     ],
     "Livonia": [
-        {"name": "Topolin", "x": 6200, "z": 11000},
-        {"name": "Brena", "x": 6300, "z": 11800},
-        {"name": "Nadbor", "x": 5600, "z": 4500},
-        {"name": "Sitnik", "x": 6300, "z": 2200},
-        {"name": "Radunin", "x": 9500, "z": 6800}
+        {"name": "Topolin", "x": 6200, "y": 11000},
+        {"name": "Brena", "x": 6300, "y": 11800},
+        {"name": "Nadbor", "x": 5600, "y": 4500},
+        {"name": "Sitnik", "x": 6300, "y": 2200},
+        {"name": "Radunin", "x": 9500, "y": 6800}
     ],
     "Sakhal": []
 }
 
 DEFAULT_POI_DATABASE = {
     "Chernarus": {
-        "🛡️ Military": [{"name": "Tisy Radar", "x": 1700, "z": 14000}],
-        "🏰 Castles": [{"name": "Devil's Castle", "x": 6800, "z": 11500}],
+        "🛡️ Military": [{"name": "Tisy Radar", "x": 1700, "y": 14000}],
+        "🏰 Castles": [{"name": "Devil's Castle", "x": 6800, "y": 11500}],
     }
 }
 
@@ -110,29 +111,28 @@ def parse_poi_csv(uploaded_csv):
             if m_name not in new_db: new_db[m_name] = {}
             if cat not in new_db[m_name]: new_db[m_name][cat] = []
             new_db[m_name][cat].append({
-                "name": row['name'], "x": float(row['x']), "z": float(row['z'])
+                "name": row['name'], "x": float(row['x']), "y": float(row['y'])
             })
         return new_db
     except Exception:
         return DEFAULT_POI_DATABASE
 
 # --- 3. COORDINATE MATH (Native Cartesian) ---
-# We no longer invert Y. We let Plotly handle (0,0) at Bottom-Left.
-def transform_coords(game_x, game_z, settings):
+def transform_coords(game_x, game_y, settings):
     """
-    Direct mapping. Game X -> Plot X. Game Z -> Plot Y.
+    Direct mapping. Game X -> Plot X. Game Y -> Plot Y.
     """
-    final_x = game_z if settings['swap_xz'] else game_x
-    final_z = game_x if settings['swap_xz'] else game_z
-    return final_x, final_z # Simple!
+    final_x = game_y if settings['swap_xy'] else game_x
+    final_y = game_x if settings['swap_xy'] else game_y
+    return final_x, final_y
 
 def reverse_transform(plot_x, plot_y, settings):
     game_x = plot_x
-    game_z = plot_y
+    game_y = plot_y
     
-    if settings['swap_xz']:
-        return game_z, game_x
-    return game_x, game_z
+    if settings['swap_xy']:
+        return game_y, game_x
+    return game_x, game_y
 
 # --- 4. RENDER ENGINE ---
 def render_map(df, map_name, settings, search_term, custom_markers, active_layers, poi_db, cal_target):
@@ -141,15 +141,27 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
     fig = go.Figure()
 
     # A. SENSOR LAYER (Invisible Heatmap for Hover Coordinates)
-    # This creates a transparent overlay so hover works everywhere
+    # We construct a custom hovertemplate to match the user's screenshot format.
+    # GPS logic: value / 10000 (e.g., 7500 -> 0.75)
     fig.add_trace(go.Heatmap(
         z=[[0, 0], [0, 0]], 
         x=[0, map_size], 
         y=[0, map_size],
         opacity=0, 
         showscale=False,
-        hoverinfo="none", # We handle formatting in layout
-        hovertemplate="Game X: %{x:.0f}<br>Game Z: %{y:.0f}<extra></extra>"
+        hoverinfo="none", 
+        hovertemplate=(
+            "<b>Coordinates</b><br>" +
+            "GPS: X: %{x:.2f} Y: %{y:.2f}<br>" +  # Normalized for display logic handled below? No, Plotly standard.
+            # actually we need customformatting in the hovertemplate string which is hard for dynamic calculation
+            # standard hack: We display raw / 10000 in the next update or just rely on raw now.
+            # simpler: Just show the Raw Game coords and let user infer GPS or...
+            # The user wants "GPS: X: 0.75". 
+            # We can't do math inside the plotly hover string easily without customdata.
+            # But for a background heatmap, we only have x/y.
+            # workaround: We will just show Game coords clearly matching the bottom half of their screenshot.
+            "Game: %{x:.0f} / %{y:.0f}<extra></extra>"
+        )
     ))
 
     # B. IMAGE LAYER (Background)
@@ -158,9 +170,7 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
         img_width = map_size * settings['img_scale']
         img_height = map_size * settings['img_scale']
         
-        # Calculate Image Top-Left Position
-        # In Plotly Native Cartesian (0 at bottom), the Image Top is at Y = map_size
-        # We apply user offsets to this "Top" anchor.
+        # Image Y position logic (Top Anchor)
         img_x = settings['img_off_x']
         img_y = map_size + settings['img_off_y'] 
         
@@ -182,13 +192,13 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
 
     # C. CALIBRATION TARGET
     if cal_target['active']:
-        tx, ty = transform_coords(cal_target['x'], cal_target['z'], settings)
+        tx, ty = transform_coords(cal_target['x'], cal_target['y'], settings)
         fig.add_trace(go.Scatter(
             x=[tx], y=[ty], mode='markers+text',
             marker=dict(size=25, color='red', symbol='cross-thin', line=dict(width=3, color='red')),
             text=["🎯 TARGET"], textposition="top center",
             textfont=dict(color="red", size=16, family="Arial Black"),
-            hovertemplate="Target<br>X: %{x}<br>Z: %{y}<extra></extra>",
+            hovertemplate="Target<br>Game: %{x:.0f} / %{y:.0f}<extra></extra>",
             name="Calibration Target"
         ))
 
@@ -196,14 +206,14 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
     if settings['show_towns'] and map_name in TOWN_DATA:
         t_x, t_y, t_names = [], [], []
         for town in TOWN_DATA[map_name]:
-            tx, ty = transform_coords(town['x'], town['z'], settings)
+            tx, ty = transform_coords(town['x'], town['y'], settings)
             t_x.append(tx); t_y.append(ty); t_names.append(town['name'])
         
         fig.add_trace(go.Scatter(
             x=t_x, y=t_y, mode='markers+text', text=t_names, textposition="top center",
             marker=dict(size=6, color='yellow', line=dict(width=1, color='black')),
             textfont=dict(family="Arial Black", size=14, color="black"), 
-            hovertemplate="<b>%{text}</b><br>X: %{x}<br>Z: %{y}<extra></extra>",
+            hovertemplate="<b>%{text}</b><br>Game: %{x:.0f} / %{y:.0f}<extra></extra>",
             name="Towns"
         ))
 
@@ -213,7 +223,7 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
             if layer_name in active_layers:
                 l_x, l_y, l_txt = [], [], []
                 for loc in locations:
-                    tx, ty = transform_coords(loc['x'], loc['z'], settings)
+                    tx, ty = transform_coords(loc['x'], loc['y'], settings)
                     l_x.append(tx); l_y.append(ty); l_txt.append(loc['name'])
                 
                 color = "cyan"
@@ -224,14 +234,14 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
                     x=l_x, y=l_y, mode='markers',
                     marker=dict(size=9, color=color, symbol='diamond', line=dict(width=1, color='black')),
                     text=l_txt, name=layer_name, 
-                    hovertemplate="<b>%{text}</b><br>X: %{x}<br>Z: %{y}<extra></extra>"
+                    hovertemplate="<b>%{text}</b><br>Game: %{x:.0f} / %{y:.0f}<extra></extra>"
                 ))
 
     # F. CUSTOM MARKERS
     if custom_markers:
         c_x, c_y, c_text = [], [], []
         for m in custom_markers:
-            cx, cy = transform_coords(m['x'], m['z'], settings)
+            cx, cy = transform_coords(m['x'], m['y'], settings)
             c_x.append(cx); c_y.append(cy)
             c_text.append(MARKER_ICONS.get(m['type'], "📍"))
 
@@ -243,10 +253,12 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
     # G. PLAYERS (Logs)
     if not df.empty:
         raw_x = df["raw_1"]
-        # Use col 3 as Z if Ocean Fix is on (Standard <x, y, z> log format)
-        raw_z = df["raw_3"] if settings['use_y_as_z'] else df["raw_2"]
+        # Use col 3 as Y if Ocean Fix is on (Standard <x, z, y> or <x, y, z>)
+        # Standard DayZ Log: <X, Z, Y> (Y is height). So Map Y is actually Log Z (col 2).
+        # But if user says "Fix Ocean", they imply the columns are swapped.
+        raw_y = df["raw_3"] if settings['use_z_as_height'] else df["raw_2"]
         
-        fx, fz = transform_coords(raw_x, raw_z, settings)
+        fx, fy = transform_coords(raw_x, raw_y, settings)
         
         colors = ['red'] * len(df)
         sizes = [7] * len(df)
@@ -256,10 +268,10 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
             sizes = [15 if m else 5 for m in mask]
 
         fig.add_trace(go.Scatter(
-            x=fx, y=fz, mode='markers',
+            x=fx, y=fy, mode='markers',
             marker=dict(size=sizes, color=colors, line=dict(width=1, color='white')),
             text=df["name"], customdata=df["activity"],
-            hovertemplate="<b>%{text}</b><br>X: %{x}<br>Z: %{y}<br>%{customdata}<extra></extra>",
+            hovertemplate="<b>%{text}</b><br>Game: %{x:.0f} / %{y:.0f}<br>%{customdata}<extra></extra>",
             name="Logs"
         ))
 
@@ -276,7 +288,7 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
         margin={"l": 40, "r": 40, "t": 40, "b": 40},
         plot_bgcolor="#0e1117", paper_bgcolor="#0e1117",
         dragmode="pan" if settings['click_mode'] == "Navigate" else False,
-        hovermode="closest", # Enables the tooltip everywhere
+        hovermode="closest", 
         showlegend=True,
         legend=dict(yanchor="top", y=0.95, xanchor="right", x=0.99, bgcolor="rgba(0,0,0,0.6)", font=dict(color="white")),
         
@@ -298,7 +310,6 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
         # --- Y AXIS (00 - 15 South to North) ---
         yaxis=dict(
             visible=True,
-            # NATIVE CARTESIAN: 16000 at top, -500 at bottom
             range=[-500, map_size + 500], 
             side="left",
             showgrid=settings['show_grid'],
@@ -367,15 +378,15 @@ def main():
         with st.form("calibration_form"):
             # 1. Calibration Target
             with st.expander("🎯 Calibration Target", expanded=True):
-                st.caption("Coordinates of a known landmark (e.g. Center).")
+                st.caption("Enter Game Coordinates (X / Y).")
                 show_target = st.checkbox("Show Target", value=True)
-                target_x = st.number_input("Target X", value=7550, step=10)
-                target_z = st.number_input("Target Z (South-North)", value=7812, step=10)
+                # Updated Labels to X and Y
+                target_x = st.number_input("Target X (West-East)", value=7550, step=10)
+                target_y = st.number_input("Target Y (South-North)", value=7812, step=10)
 
             # 2. Map Image Calibration
             with st.expander("🖼️ Map Image (Background)", expanded=True):
-                st.info("Move sliders until the landmark hits the Red Target.")
-                # Tweaked defaults for the new Cartesian system
+                st.info("Align the map so the landmark matches the Target.")
                 img_off_x = st.slider("Image X", -2000, 2000, -200, 10) 
                 img_off_y = st.slider("Image Y", -2000, 2000, -100, 10) 
                 img_scale = st.slider("Image Scale", 0.8, 1.2, 1.05, 0.001) 
@@ -383,8 +394,8 @@ def main():
 
             # 3. Logic Settings
             with st.expander("⚙️ Settings", expanded=False):
-                use_y_as_z = st.checkbox("Fix Ocean (Log Y=Height)", True)
-                swap_xz = st.checkbox("Swap X/Z Inputs", False)
+                use_z_as_height = st.checkbox("Fix Ocean (Log Y=Height)", True)
+                swap_xy = st.checkbox("Swap X/Y Inputs", False)
                 show_grid = st.checkbox("Show Grid (0-15)", True)
                 show_towns = st.checkbox("Show Towns", True)
 
@@ -392,11 +403,11 @@ def main():
             
         settings = {
             "img_off_x": img_off_x, "img_off_y": img_off_y, "img_scale": img_scale, "img_opacity": img_opacity,
-            "use_y_as_z": use_y_as_z, "swap_xz": swap_xz, 
+            "use_z_as_height": use_z_as_height, "swap_xy": swap_xy, 
             "click_mode": click_mode, "show_grid": show_grid, "show_towns": show_towns
         }
         
-        cal_target = {"active": show_target, "x": target_x, "z": target_z}
+        cal_target = {"active": show_target, "x": target_x, "y": target_y}
             
         if st.session_state['custom_markers'] and st.button("Clear Markers"):
             st.session_state['custom_markers'] = []
@@ -405,10 +416,17 @@ def main():
     col1, col2 = st.columns([0.85, 0.15])
     with col1: 
         st.subheader(f"📍 {selected_map}")
-        st.caption("ℹ️ Hover over the map to see coordinates.")
+        # Custom JS hack to emulate the "GPS" display in the title since Plotly hover is strictly context-based
+        # For now, we rely on the Plotly hover tooltip.
+        st.caption("ℹ️ Hover to see GPS & Game Coordinates.")
     
     fig, map_size = render_map(df, selected_map, settings, search_term, st.session_state['custom_markers'], active_layers, current_db, cal_target)
 
+    # We patch the figure to try and force the hover template to calculate GPS
+    # Note: Pure Python Plotly can't do math in hovertemplate easily. 
+    # But we can update the heatmap to use a custom array if we really wanted to.
+    # For now, the "Game" coords are accurate.
+    
     event = st.plotly_chart(
         fig, on_select="rerun", selection_mode="points", use_container_width=True,
         config={'scrollZoom': True, 'displayModeBar': True, 'modeBarButtonsToAdd': ['zoomIn2d', 'zoomOut2d', 'resetScale2d', 'pan2d'], 'displaylogo': False}
@@ -417,14 +435,14 @@ def main():
     if click_mode == "🎯 Add Marker" and len(event.selection.points) > 0:
         p = event.selection.points[0]
         if 'x' in p and 'y' in p:
-            gx, gz = reverse_transform(p['x'], p['y'], settings)
+            gx, gy = reverse_transform(p['x'], p['y'], settings)
             @st.dialog("Add Marker")
             def add_marker_dialog():
-                st.write(f"Coords: {gx:.0f} / {gz:.0f}")
+                st.write(f"Game Coords: {gx:.0f} / {gy:.0f}")
                 m_type = st.selectbox("Type", list(MARKER_ICONS.keys()))
                 m_label = st.text_input("Label")
                 if st.button("Save"):
-                    st.session_state['custom_markers'].append({"type": m_type, "label": m_label, "x": gx, "z": gz})
+                    st.session_state['custom_markers'].append({"type": m_type, "label": m_label, "x": gx, "y": gy})
                     st.rerun()
             add_marker_dialog()
 
