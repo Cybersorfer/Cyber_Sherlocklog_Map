@@ -8,13 +8,13 @@ from datetime import datetime
 # --- 1. CONFIGURATION & SAVED CALIBRATION ---
 st.set_page_config(layout="wide", page_title="DayZ Intel Mapper")
 
-# ⚠️ UPDATE THESE NUMBERS WITH YOUR WINNING SETTINGS! ⚠️
+# ⚠️ YOUR WINNING NUMBERS (These are now forced to load)
 DEFAULT_CALIBRATION = {
-    "img_off_x": -100,  # Replace with your "Image X"
-    "img_off_y": -300,  # Replace with your "Image Y"
-    "img_scale": 1.04,  # Replace with your "Image Scale"
-    "target_x": 7441,   # Your Target X
-    "target_y": 7043    # Your Target Y
+    "img_off_x": -100,  
+    "img_off_y": -300,  
+    "img_scale": 1.04,  
+    "target_x": 7441,   
+    "target_y": 7043    
 }
 
 MAP_CONFIG = {
@@ -23,7 +23,7 @@ MAP_CONFIG = {
     "Sakhal": {"size": 8192, "image": "map_sakhal.png"}
 }
 
-# --- DATABASE (Standard DayZ Coordinates) ---
+# --- DATABASE ---
 TOWN_DATA = {
     "Chernarus": [
         {"name": "NWAF", "x": 4600, "y": 10200},
@@ -125,7 +125,7 @@ def parse_poi_csv(uploaded_csv):
     except Exception:
         return DEFAULT_POI_DATABASE
 
-# --- 3. COORDINATE MATH (Native Cartesian) ---
+# --- 3. COORDINATE MATH ---
 def transform_coords(game_x, game_y, settings):
     final_x = game_y if settings['swap_xy'] else game_x
     final_y = game_x if settings['swap_xy'] else game_y
@@ -145,8 +145,7 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
     fig = go.Figure()
 
     # A. SENSOR LAYER (Invisible Heatmap for Hover)
-    # This handles the GPS logic calculation for the tooltip
-    # GPS Y = (MapSize - GameY) / 10000
+    # Using a dummy layer just to catch hover events
     fig.add_trace(go.Heatmap(
         z=[[0, 0], [0, 0]], 
         x=[0, map_size], 
@@ -154,12 +153,7 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
         opacity=0, 
         showscale=False,
         hoverinfo="none", 
-        hovertemplate=(
-            "<b>Game:</b> %{x:.0f} / %{y:.0f}<br>" 
-            # Note: We can't do complex math in the template easily, 
-            # so we display raw and rely on the UI/Dialog for precise GPS
-            "<extra></extra>"
-        )
+        hovertemplate="<extra></extra>" # Suppress default, we rely on layout hover
     ))
 
     # B. IMAGE LAYER (Background)
@@ -260,7 +254,7 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
             sizes = [15 if m else 5 for m in mask]
 
         fig.add_trace(go.Scatter(
-            x=fx, y=fy, mode='markers',
+            x=fx, y=fz, mode='markers',
             marker=dict(size=sizes, color=colors, line=dict(width=1, color='white')),
             text=df["name"], customdata=df["activity"],
             hovertemplate="<b>%{text}</b><br>Game: %{x:.0f} / %{y:.0f}<br>%{customdata}<extra></extra>",
@@ -275,12 +269,12 @@ def render_map(df, map_name, settings, search_term, custom_markers, active_layer
         grid_vals_x.append(i * 1000)
         grid_text_x.append(f"{i:02d}")
 
-    # Y Axis (15-00) REVERSED
+    # Y Axis (15-00) - Correctly Inverted for Display
     grid_vals_y = []
     grid_text_y = []
     for i in range(17): 
         grid_vals_y.append(i * 1000)      
-        grid_text_y.append(f"{15-i:02d}") # 15 at bottom (0), 00 at top (15000)
+        grid_text_y.append(f"{15-i:02d}")
 
     # I. LAYOUT
     fig.update_layout(
@@ -367,9 +361,10 @@ def main():
 
             with st.expander("🖼️ Map Image", expanded=True):
                 st.info("Align map to Target.")
-                img_off_x = st.slider("Image X", -2000, 2000, DEFAULT_CALIBRATION['img_off_x'], 10) 
-                img_off_y = st.slider("Image Y", -2000, 2000, DEFAULT_CALIBRATION['img_off_y'], 10) 
-                img_scale = st.slider("Image Scale", 0.8, 1.2, DEFAULT_CALIBRATION['img_scale'], 0.001) 
+                # I changed the 'key' parameters here to force a reset!
+                img_off_x = st.slider("Image X", -2000, 2000, DEFAULT_CALIBRATION['img_off_x'], 10, key="cal_img_x") 
+                img_off_y = st.slider("Image Y", -2000, 2000, DEFAULT_CALIBRATION['img_off_y'], 10, key="cal_img_y") 
+                img_scale = st.slider("Image Scale", 0.8, 1.2, DEFAULT_CALIBRATION['img_scale'], 0.001, key="cal_img_scale") 
                 img_opacity = st.slider("Opacity", 0.1, 1.0, 1.0, 0.1)
 
             with st.expander("⚙️ Settings", expanded=False):
@@ -410,11 +405,11 @@ def main():
             gx, gy = reverse_transform(p['x'], p['y'], settings)
             @st.dialog("Add Marker")
             def add_marker_dialog():
-                # Correct GPS Calculation (Y Inverted for display)
-                # GPS X = Game X / 10000
-                # GPS Y = (Map Size - Game Y) / 10000
+                # Correct GPS Calculation (Standard: Value / 10000)
+                # X: 7553 -> 0.75
+                # Y: 7816 -> 0.78
                 gps_x = gx / 10000
-                gps_y = (map_size - gy) / 10000
+                gps_y = gy / 10000
                 
                 st.write(f"GPS: X: {gps_x:.2f} Y: {gps_y:.2f}")
                 st.write(f"Game: {gx:.0f} / {gy:.0f}")
