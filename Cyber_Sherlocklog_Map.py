@@ -10,8 +10,8 @@ st.set_page_config(layout="wide", page_title="DayZ Intel Mapper")
 
 # ⚠️ YOUR WINNING NUMBERS (These are now forced to load)
 DEFAULT_CALIBRATION = {
-    "img_off_x": -100,  
-    "img_off_y": -300,  
+    "img_off_x": -120,  
+    "img_off_y": -200,  
     "img_scale": 1.04,  
     "target_x": 7441,   
     "target_y": 7043    
@@ -423,3 +423,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
